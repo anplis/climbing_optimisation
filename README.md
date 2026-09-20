@@ -1,2 +1,2 @@
 # climbing_optimisation
-Find the most efficient way to climb a boulder
+Goal : Find the most efficient sequence to climb a boulder
