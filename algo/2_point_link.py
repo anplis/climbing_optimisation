@@ -14,11 +14,11 @@ class Point:
         self.x = x
         self.y = y
         
-
+size = 30
 # Création de la figure
 fig, ax = plt.subplots()
-ax.set_xlim(-10, 10)
-ax.set_ylim(-10, 10)
+ax.set_xlim(-size, size)
+ax.set_ylim(-size, size)
 ax.set_aspect("equal")
 
 # Active le mode interactif
@@ -84,16 +84,22 @@ class solid:
         self.p2.x = self.x - (self.l/2)*ma.cos(self.teta)
         self.p2.y = self.y - (self.l/2)*ma.sin(self.teta)
         
+        self.line.set_data(
+                    [self.p1.x, self.p2.x],
+                    [self.p1.y, self.p2.y])
+        
         self.viewer_1.update()
         self.viewer_2.update()
         
-        self.line.set_data(
-            [self.p1.x, self.p2.x],
-            [self.p1.y, self.p2.y])
+        
+teta = 0
+l = 5
+m = 0.5
 
-s = solid(0, 1, 1, 0, 0)
+s = solid(teta, l, m, 0, 0)
 
-set_force = [[{'F' : [3,0], 'ini_t' : 0, 'durée' : 2}], [{'F' : [1,1], 'ini_t' : 0, 'durée' : 4},{'F' : [1,2], 'ini_t' : 3, 'durée' : 3}]]    # Forces appliquées sur p1 puis p2
+set_force = [[{'F' : [0,10], 'ini_t' : 2, 'durée' : 2}], []]    # Forces appliquées sur p1 puis p2 (au point p1 et p2)
+set_global_force = [{'F' : poid, 'ini_t' : 0, 'durée' : T}]    # Forces appliquées sur le solide s (au centre du solide)
 
 if __name__ == "__main__":
     
@@ -102,19 +108,28 @@ if __name__ == "__main__":
         plt.pause(dt)
         
         force_p = [[0,0],[0,0]] # Sommes des force des deux points p1 et p2
-        force_s = [0,0] # Force résultante du solide s
+        force_s = [0,0]         # Force résultante du solide s
+        moment_s = 0            # Moment du solide s
         for i in range(2):
             for force in set_force[i]:
-                Fx,Fy = force['F']
-                force_p[i][0] += Fx
-                force_p[i][1] += Fy
+                if t <= force['ini_t']+force['durée'] and t >= force['ini_t']:
+                    Fx,Fy = force['F']
+                    force_p[i][0] += Fx
+                    force_p[i][1] += Fy
         
             force_s[0] += force_p[i][0] # Somme des forces selon x du point p
             force_s[1] += force_p[i][1] # Somme des forces selon y du point p
             
+            moment_s += ((-1)**i)*(s.l/2)*(ma.cos(s.teta)*force_s[1] - ma.sin(s.teta)*force_s[0])   # Produit vectoriel entre vecteur position et la force appliquée au point p
+            
+        
+        for force in set_global_force:  # Les forces globals s'appliquent sur le solide donc pas de moment induit
+            Fx,Fy = force['F'](s.m)
+            force_s[0] += Fx
+            force_s[1] += Fy
+            
         s.force(force_s)
         
-        moment_s = (s.l/2)*(ma.cos(s.teta)*force_s[1] - ma.sin(s.teta)*force_s[0])
         
         s.moment(moment_s)
         
