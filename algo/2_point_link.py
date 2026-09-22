@@ -3,7 +3,7 @@ import math as ma
 
 T = 10  # Durée totale de la simulation en secondes
 dt = 0.1
-chronologie = [i*dt for i in range(int(T//dt))]  # Liste des instants de temps
+chronologie = [i*dt for i in range(int(round(T//dt)))]  # Liste des instants de temps
 
 def poid(m):
     g = 9.81
@@ -75,7 +75,7 @@ class solid:
         self.move(0.5*a[0]*dt**2 + self.vx*dt, 0.5*a[1]*dt**2 + self.vy*dt)
     
     def moment(self, M):
-        a_angl = [M/(self.m*(self.l)**2)]   # self.m*(self.l)**2 étant l'intertie
+        a_angl = [M/((self.m*(self.l)**2)/12)]   # (self.m*(self.l)**2)/12 étant l'intertie d'une tige uniforme
         self.rotate(0.5*a_angl[0]*dt**2 + self.omega*dt)
     
     def update(self):
@@ -120,8 +120,8 @@ if __name__ == "__main__":
             force_s[0] += force_p[i][0] # Somme des forces selon x du point p
             force_s[1] += force_p[i][1] # Somme des forces selon y du point p
             
-            moment_s += ((-1)**i)*(s.l/2)*(ma.cos(s.teta)*force_s[1] - ma.sin(s.teta)*force_s[0])   # Produit vectoriel entre vecteur position et la force appliquée au point p
-            
+            moment_s += ((-1)**i)*(s.l/2)*(ma.cos(s.teta)*force_p[i][1] - ma.sin(s.teta)*force_p[i][0])   # Produit vectoriel entre vecteur position et la force appliquée au point p
+
         
         for force in set_global_force:  # Les forces globals s'appliquent sur le solide donc pas de moment induit
             Fx,Fy = force['F'](s.m)
@@ -129,7 +129,6 @@ if __name__ == "__main__":
             force_s[1] += Fy
             
         s.force(force_s)
-        
         
         s.moment(moment_s)
         
