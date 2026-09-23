@@ -34,8 +34,6 @@ class PointViewer:
 
     def update(self):
         self.scatter.set_offsets([[self.point.x, self.point.y]])
-        fig.canvas.draw()
-        fig.canvas.flush_events()
 
 class solid:
     def __init__(self, teta, l, m, x, y):
@@ -90,6 +88,9 @@ class solid:
         
         self.viewer_1.update()
         self.viewer_2.update()
+
+        fig.canvas.draw()
+        fig.canvas.flush_events() 
         
         
 teta = 0
