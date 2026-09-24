@@ -61,8 +61,6 @@ class solid:
     def move(self, dx, dy):
         self.x += dx
         self.y += dy
-        self.vx = dx/dt
-        self.vy = dy/dt
     
     def rotate(self, dteta):
         self.teta += dteta
@@ -75,6 +73,9 @@ class solid:
     def moment(self, M):
         a_angl = [M/((self.m*(self.l)**2)/12)]   # (self.m*(self.l)**2)/12 étant l'intertie d'une tige uniforme
         self.rotate(0.5*a_angl[0]*dt**2 + self.omega*dt)
+
+        self.vx = a[0]*dt
+        self.vy = a[1]*dt
     
     def update(self):
         self.p1.x = self.x + (self.l/2)*ma.cos(self.teta)
