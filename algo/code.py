@@ -14,18 +14,18 @@ Ainsi, un grimpeur pourra faire le mouvement (que l'on effectura seulement si il
 
 Autres caractéristiques du modèle :
  - Le grimpeur doit toujours avoir au moins 2 points d'accroche au mur (ce qui est réaliste pour la plupart des mouvements en escalade)
+ - On considère une grimpe dite statique, sans mouvement dynamique
 """
+
+# ---------------IMPORT--------------- #
 
 import matplotlib.pyplot as plt
 import math as ma
+import random as rd
+from func_timeout import FunctionTimedOut 
 
-def distance(XY, AB):
-    x = XY[0] - AB[0]
-    y = XY[1] - AB[1]
-    return ma.sqrt(x**2 + y**2)
 
-def angle_in(teta, a, b):   # si teta est dans a,b modulo 2pi
-    return (teta - a) % (2*ma.pi) <= (b - a) % (2*ma.pi)
+# ---------------CLASS--------------- #
 
 # Interval_l = [0, l_max]
 # Interval_teta = [teta_min, teta_max]
@@ -63,11 +63,45 @@ class point :
         
 class climber :
     def __init__(self, x = 0, y = 0 ):
+        self.fit = float('inf')
+        self.Seq = {}   # Seq = {t : [{"p": index_p or None, "F" : F}]}, None is for G move
+        
         self.G = [x, y]
         self.list_point = []
         
         # create a graph point
         self.scatter = ax.scatter([self.G[0]], [self.G[1]], s=40, color="red")  
+    
+    def add_F(self, T, p, F):
+        if T < time[-1]:
+            if T not in self.Seq:
+                self.Seq[T] = [{"p" : p, "F" : F}]
+            else:
+                self.Seq[T].append({"p" : p, "F" : F})
+    
+    def add_F_rd(self):
+        F = [rd.choice(range(-max_F, max_F, r)) for _ in range(2)]
+        T = rd.choice(range(0, T, dt))
+        p = rd.choices([0,1,2,3,None], weights=[1,1,1,1,1])
+        self.add_F(T, p, F)
+        
+    def del_F_rd(self):    # supprime un mouvement au hasard
+        del_T = rd.choice(self.Seq.keys())
+        self.Seq.pop(del_T)
+    
+    def change_move_rd(self):
+        T = rd.choice(self.Seq.keys())
+        func = rd.choices(self.change_T_rd, self.change_F_rd)
+
+        def change_T_rd(self, T):
+            self.Seq[rd.choice(range(T-1, T+1, dt))] = self.Seq[T]
+            self.Seq.pop(T)
+        def change_F_rd(self, T):
+            F = self.Seq[T]
+            new_F = [rd.choice(range(F[i]-1, F[i]+1, r)) for i in range(2)]
+            self.Seq[T]["F"] = new_F
+        
+        func(self)
     
     def add_point(self, l, teta, Interval_l, Interval_teta):
         x, y = self.G[0] + l*ma.cos(teta), self.G[1] + l*ma.sin(teta)
@@ -130,14 +164,81 @@ class climber :
         fig.canvas.draw()
         fig.canvas.flush_events()
 
-def add_F(Seq, T, p, F):
-    if T < time[-1]:
-        if T not in Seq:
-            Seq[T] = [{"p" : p, "F" : F}]
-        else:
-            Seq[T].append({"p" : p, "F" : F})
+
+# ---------------FONCTIONS--------------- #
+
+def distance(XY, AB):
+    x = XY[0] - AB[0]
+    y = XY[1] - AB[1]
+    return ma.sqrt(x**2 + y**2)
+
+def angle_in(teta, a, b):   # si teta est dans a,b modulo 2pi
+    return (teta - a)%(2*ma.pi) <= (b - a)%(2*ma.pi)
+
+# ---------------GENETIC--------------- #
+
+"Paramètres génétiques :"
+n = 100         # nombre d'individus dans la population
+n_selc = 10     # nombre d'individus séléctionnés dans la population pour être muté
+m = 10          # nombre d'individues créés par mutation génétique pour 1 individu
+perc_crv = 0.5  # pourcentage de crossover parmis les mutations donc compris dans [0,1]
+gen = 100       # nombre de générations
+max_F = 2       # maximum d'un mouvement 
+r = 0.1         # résolution des mutations génétiques
+
+
+def init_pop():     # créé une population initiale de taille n
+    return
+
+def mutation(selected : list) -> list :     # créé m variantes de chaque individu par mutations génétiques et des crossover
+    new_Cs = []
+    for C in selected:
+        for _ in range(int(m*(1-perc_crv))):
+            func = rd.choices([C.add_F_rd, C.del_F_rd, C.change_move_rd],weights=[1,1,3])[0]
+            new_C = func(C)
+            if mut_is_valid(new_C):
+                new_Cs.append(new_C)
+                
+    for _ in range(int(m*perc_crv)):
+        C1, C2 = rd.choices(selected, k = 2)
+        if mut_is_valid(new_C):
+            new_Cs.append(new_C)
+        new_Cs.append(crossover(C1,C2))
+    
+    return new_Cs
+
+def mut_is_valid(C : climber) -> bool :
+    return
+
+def crossover():    # Opérateur génétique qui mélange deux individus
+    return
+
+def insert(P,new_ind):# insert les individues dans la pop par croissance de fistness en conservant la taille de Pop (n)
+    for ind in new_ind:
+        k = 0
+        while k<len(P) and ind.fit>=P[k].fit : # trouve l'emplacement adapté du nouvel individu et l'insert
+            k+=1
+        P = P[:k] + [ind] + P[k:]
+    return P
+
+def fitness():      # évalue la performance d'un individu
+    return
+
+# pour chaque gén on créé n_selc*m nouveaux individus par mutations génétiqeus et on les insert dans la pop qui est triée par fitness(croissant)
+def evolution():
+    P = init_pop()
+    for g in range(gen):  
+        P = insert(P,mutation(P[:n_selc]))
+        
+        if g % 10 == 0:
+            print(g,'ième génération', P[0].fit,'meilleur fitness')
+    return P[0]
 
 # ---------------MAIN--------------- #
+
+T = 5  # Durée totale de la simulation en secondes
+dt = 0.1
+time = [i*dt for i in range(int(round(T/dt)))]  # Liste des instants de temps
 
 # Création de la figure :
 size = 3
@@ -166,13 +267,8 @@ for i in range(4):
     Holds.append((x,y))
     teta += ma.pi/2
 
-T = 5  # Durée totale de la simulation en secondes
-dt = 0.1
-time = [i*dt for i in range(int(round(T/dt)))]  # Liste des instants de temps
-
-Seq = {}    # Seq = {t : [{"p": index_p or None, "F" : F}]}, None is for G move
-add_F(Seq,1,0,(0.2,0.4))
-add_F(Seq,3,None,(0.2,-0.1))
+C.add_F(1,0,(0.2,0.4))
+C.add_F(3,None,(0.2,-0.1))
 
 for hold in Holds:
     plt.scatter(hold[0],hold[1], color = "green")
@@ -181,9 +277,9 @@ for p in C.list_point:
     
 for t in time:
     plt.pause(dt)
-    for T in Seq.keys():
+    for T in C.Seq.keys():
         if abs(T-t) < dt/2:
-            for move in Seq[T]:
+            for move in C.Seq[T]:
                 if move['p'] is None:
                     C.move_G(move["F"])
                 else:
