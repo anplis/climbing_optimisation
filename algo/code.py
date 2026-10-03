@@ -334,7 +334,8 @@ def mutation(selected : list) -> list :     # créé m variantes de chaque indiv
         for _ in range(m):
             new_C = copy.deepcopy(C)
             rd.choices([new_C.add_F_rd, new_C.del_F_rd, new_C.change_move_rd],weights=[1,1,3])[0]()
-            new_Cs.append(new_C)
+            if new_C.Seq != C.Seq:
+                new_Cs.append(new_C)
                 
     for _ in range(int(nb_crv)):
         C1, C2 = rd.sample(selected, k = 2) # tirage sans remise de 2 individus
@@ -375,7 +376,7 @@ def fitness(C):
     except NameError:       # arrêt au premier mouvement impossible
         pass
     held_y = max(p.y for p in C.list_point if p.hold)
-    return abs(Holds[-1][1] - held_y) + 0.1*distance(C.G, Holds[-1])  #+ len(list(C.Seq.keys()))*0.001
+    return abs(Holds[-1][1] - held_y) + 0.1*distance(C.G, Holds[-1])  + len(list(C.Seq.keys()))*0.0001
  
 # pour chaque gén on créé n_selc*m nouveaux individus par mutations génétiqeus et on les insert dans la pop qui est triée par fitness(croissant)
 def evolution():
@@ -399,7 +400,7 @@ n_selc = 20     # nombre d'individus séléctionnés dans la population pour êt
 a = 0.5         # paramètre dans [0,1] qui gére la probabilité qu'un individu soit séléctionné en fonction de son rang dans la pop(0 : equiproba)
 m = 40          # nombre d'individues créés par mutation génétique pour 1 individu
 nb_crv = 40     # nombre de crossover fait par gen
-gen = 1000      # nombre de générations
+gen = 10000      # nombre de générations
 max_F = 2       # maximum d'un mouvement 
 
 "Paramètres climber :"
@@ -419,7 +420,9 @@ time = [i for i in range(round(1 + T_tot/dt)) ]  # Liste des instants de temps (
 
 # ---------------MAIN--------------- #
 
+evolution()
+
+# ---------------DATA--------------- #
 Seq_1 = {3: [{'p': 1, 'F': [2.135604099506924, 1.0376086390008536]}], 8: [{'p': None, 'F': [0.4087310677729298, 1.7670916896636246]}], 9: [{'p': 2, 'F': [0.9944713028914205, 2.4992697003922246]}, {'p': 0, 'F': [-0.6731826595314745, 1.575923474303509]}, {'p': None, 'F': [0.10077818630644536, 0.34518473378182046]}, {'p': 0, 'F': [-0.05803191145427711, 1.449948494479792]}, {'p': 3, 'F': [0.7256089028368962, 3.444288263784847]}, {'p': 1, 'F': [0.7945739598932108, 1.9105100495576275]}, {'p': None, 'F': [0.512932950069761, 0.5241715073765454]}, {'p': None, 'F': [0.20260799777765193, 1.1876370330740071]}, {'p': 2, 'F': [1.0390310448359248, 1.9951548809652138]}, {'p': 1, 'F': [-2.190759440096513, 0.6442700320729509]}], 15: [{'p': None, 'F': [0.0921273594444235, 1.0744946229840349]}, {'p': 0, 'F': [1.3789712384860657, -0.7218835346242749]}], 19: [{'p': None, 'F': [0.4453837240610285, 0.9786968912656605]}, {'p': 0, 'F': [1.3789712384860657, -0.7218835346242749]}], 23: [{'p': 1, 'F': [-1.0341001770095113, 1.1934577329552523]}], 24: [{'p': None, 'F': [-0.12138763835393268, -0.9046130781874556]}], 25: [{'p': None, 'F': [-0.23963538813272522, 1.3966355717091261]}, {'p': None, 'F': [-1.0198707959648632, 0.17206909677777701]}], 30: [{'p': None, 'F': [0.24315990244044156, -0.6237985326001825]}], 40: [{'p': 0, 'F': [-0.03350234772734506, -0.2944245813574389]}, {'p': None, 'F': [-0.7237036955248382, 0.16312849233510757]}], 48: [{'p': 0, 'F': [0.24972100990391005, -0.03981269892717468]}, {'p': None, 'F': [-1.1510412026518408, 0.14301361587453876]}], 38: [{'p': 1, 'F': [0.7312145709857516, 0.9741280312166989]}], 36: [{'p': None, 'F': [1.5394856472621403, 1.1448168046679967]}], 42: [{'p': 2, 'F': [0.40928578989552317, 0.21541723985023922]}]}
 
-simulation(Seq_1)
 
