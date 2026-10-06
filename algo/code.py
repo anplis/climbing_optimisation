@@ -342,14 +342,15 @@ def mutation(selected : list) -> list :     # créé m variantes de chaque indiv
 
 def crossover(C1,C2):    # Opérateur génétique qui mélange deux individus
     C_new = init_climber()
-    cross_point = rd.randrange(0,time[-1])
+    crp_1 = rd.randrange(0,time[-2])
+    crp_2 = rd.randrange(crp_1,time[-1])
     if C1.Seq.keys():
         for T in C1.Seq.keys() :
-            if T < cross_point:
+            if crp_1 <= T >= crp_2:
                 C_new.Seq[T] = copy.deepcopy(C1.Seq[T])
     if C2.Seq.keys():
         for T in C2.Seq.keys():
-            if T >= cross_point:
+            if crp_1 > T < crp_2:
                 C_new.Seq[T] = copy.deepcopy(C2.Seq[T])
     return C_new
 
