@@ -14,7 +14,8 @@ Ainsi, un grimpeur pourra faire le mouvement (que l'on effectura seulement si il
 
 Autres caractéristiques du modèle :
  - Le grimpeur doit toujours avoir au moins 2 points d'accroche au mur (ce qui est réaliste pour la plupart des mouvements en escalade)
- - On considère une grimpe dite statique, sans mouvement dynamique
+ - On considère une grimpe dite statique, sans mouvement dynamique avec des mouvement instananés pour l'instant
+ - les pieds sont toujours en dessous de G
 """
 
 # ---------------IMPORT--------------- #
@@ -29,10 +30,9 @@ import copy as copy
 # ---------------CLASS--------------- #
 
 # Interval_l = [0, l_max]
-# Interval_teta = [teta_min, teta_max]
 
 class point :
-    def __init__(self, x, y, l, teta, Interval_l, Interval_teta, do_graph=False):
+    def __init__(self, x, y, l, teta, Interval_l, do_graph=False):
         self.hold = False
         self.x = x
         self.y = y
@@ -40,7 +40,6 @@ class point :
         self.teta = teta
         
         self.Interval_l = Interval_l
-        self.Interval_teta = Interval_teta
         
         if do_graph:
             self.scatter = ax.scatter([self.x], [self.y], s=40, color="blue")
@@ -76,6 +75,7 @@ class climber :
     def reset(self):
         reset_all_points(self)
     
+    
     def add_F(self, T, p, F):
         if T <= time[-1]:
             self.Seq[T] = {"p" : p, "F" : F}
@@ -89,12 +89,12 @@ class climber :
             p_index = rd.choice(range(len(self.list_point)))
             if self.list_point[p_index].hold and sum(q.hold for q in self.list_point) <= 2: # si pas assez de points accrochés
                 pass
-            possible_hold_F = self.possible_move_to_hold(T)
+            possible_hold_F = self.possible_move_to_hold(T, p_index)
             if possible_hold_F:
                 F = rd.choice(possible_hold_F)
                 self.add_F(T, p_index, F)
     
-    def possible_move_to_hold(self, T_new):
+    def possible_move_to_hold(self, T_new, p_index):
         # On simule la grimpe jusqu'au temps T_new
         self.reset()
         try:
@@ -106,8 +106,9 @@ class climber :
         except NameError:       # arrêt au premier mouvement impossible
             pass
         
-        p = rd.choice(self.list_point)
-        return [[h[0] - p.x, h[1] - p.y] for h in Holds if distance(h, (p.x, p.y)) > 1e-9 and self.is_valid(p, self.G, h)]  # 1e-9 pour pas que ce soit la même prise
+        p = self.list_point[p_index]
+        F_possible = [[h[0] - p.x, h[1] - p.y] for h in Holds if distance(h, (p.x, p.y)) > 1e-9 and self.is_valid(p, self.G, h)]  # 1e-9 pour pas que ce soit la même prise
+        return [F for F in F_possible if self.if_possible_move_p(p,F)]
     
     def del_F_rd(self):    # supprime un mouvement au hasard
         Ts = [T for T in self.Seq if self.Seq[T]]      # instants qui ont encore des mouvements
@@ -130,9 +131,9 @@ class climber :
                 self.Seq[T]["F"] = [f + rd.uniform(-0.1, 0.1)*max_F for f in move["F"]]
         
     
-    def add_point(self, l, teta, Interval_l, Interval_teta):
+    def add_point(self, l, teta, Interval_l):
         x, y = self.G[0] + l*ma.cos(teta), self.G[1] + l*ma.sin(teta)
-        self.list_point.append(point(x,  y, l , teta, Interval_l, Interval_teta, self.do_graph))  
+        self.list_point.append(point(x,  y, l , teta, Interval_l, self.do_graph))  
         
         if self.do_graph:
             # create a graph line between G and the new point
@@ -150,12 +151,11 @@ class climber :
             self.G[0] += F[0]
             self.G[1] += F[1]
             
-            if self.do_graph:
-                for point in self.list_point:
-                    x = point.x - self.G[0]
-                    y = point.y - self.G[1]
-                    point.l = ma.hypot(x, y)
-                    point.teta = ma.atan2(y,x) 
+            for p in self.list_point:
+                x = p.x - self.G[0]
+                y = p.y - self.G[1]
+                p.l = ma.hypot(x, y)
+                p.teta = ma.atan2(y,x) 
         else:
             raise NameError('not possible')
     
@@ -169,9 +169,8 @@ class climber :
             
             self.list_point[index_point].hold_hold()  # essaie de s'accrocher à une prise si possible
             
-            if self.do_graph:
-                self.list_point[index_point].l = ma.sqrt(x**2 + y**2)   # met à jour l et teta du point
-                self.list_point[index_point].teta = ma.atan2(y,x) 
+            self.list_point[index_point].l = ma.sqrt(x**2 + y**2)   # met à jour l et teta du point
+            self.list_point[index_point].teta = ma.atan2(y,x) 
         else:
             raise NameError('not possible')
     
@@ -186,17 +185,20 @@ class climber :
         return self.is_valid(p, self.G, (p.x + F[0], p.y + F[1]))
     
     def is_valid(self, p, G, pos):
-        x, y = pos[0] - G[0], pos[1] - G[1]
+        x, y = pos[0] - G[0], pos[1] - G[1] # position relative à G
         l = ma.hypot(x, y)
-        teta = ma.atan2(y, x)
-        return (p.Interval_l[0] <= l <= p.Interval_l[1] and angle_in(teta, p.Interval_teta))
+        if not (p.Interval_l[0] <= l <= p.Interval_l[1]):
+            return False
+        if p in self.list_point[:2] and y > 0:  # les jambes ne doivent pas être au dessu de centre G
+            return False
+        return True
     
     def update_graph(self):
         self.scatter.set_offsets([self.G[0], self.G[1]])                    # update G
         
-        for point in self.list_point :
-            point.update_graph()                                            # update points
-            point.line.set_data([self.G[0], point.x], [self.G[1], point.y])  # update lines
+        for p in self.list_point :
+            p.update_graph()                                            # update points
+            p.line.set_data([self.G[0], p.x], [self.G[1], p.y])  # update lines
         
         fig.canvas.draw()
         fig.canvas.flush_events()
@@ -273,7 +275,6 @@ def line_intersection(line1, line2):    # line1 = [(x1,y1),(x2,y2)], line2 = [(x
     return x, y
 
 # ---------------GENETIC--------------- #
-Interval_teta = {0: [-ma.pi, 0], 1: [-ma.pi, 0], 2: [-ma.pi/2, ma.pi/2], 3: [ma.pi/2, 3*ma.pi/2]}
 
 def init_climber(do_graph = False):
     G, POS_point = pos_init()
@@ -281,7 +282,7 @@ def init_climber(do_graph = False):
     for i in range(4):
         l,teta = POS_point[i]
         l_max = l_j if i < 2 else l_b
-        C.add_point(l, teta, [0,l_max], Interval_teta[i] )
+        C.add_point(l, teta, [0,l_max])
         C.list_point[i].hold_hold()  # on accroche les points de départ aux prises
     return C
 
@@ -346,11 +347,11 @@ def crossover(C1,C2):    # Opérateur génétique qui mélange deux individus
     crp_2 = rd.randrange(crp_1,time[-1])
     if C1.Seq.keys():
         for T in C1.Seq.keys() :
-            if crp_1 <= T >= crp_2:
+            if crp_1 >= T or T >= crp_2:
                 C_new.Seq[T] = copy.deepcopy(C1.Seq[T])
     if C2.Seq.keys():
         for T in C2.Seq.keys():
-            if crp_1 > T < crp_2:
+            if crp_1 < T < crp_2:
                 C_new.Seq[T] = copy.deepcopy(C2.Seq[T])
     return C_new
 
@@ -372,7 +373,14 @@ def fitness(C):
     except NameError:       # arrêt au premier mouvement impossible
         pass
     held_y = max(p.y for p in C.list_point if p.hold)
-    return (Holds[-1][1] - held_y)**2 + c_G*distance(C.G, Holds[-1])  + len(list(C.Seq.keys()))*c_size
+    height_still = (Holds[-1][1] - held_y)**2
+    if height_still <= 1e-5:
+        c_G = 0
+        c_size = fitness_w['c_size']
+    else:
+        c_G = fitness_w['c_G']
+        c_size = 0
+    return height_still + c_G*distance(C.G, Holds[-1])  + len(list(C.Seq.keys()))*c_size
  
 # pour chaque gén on créé n_selc*m nouveaux individus par mutations génétiqeus et on les insert dans la pop qui est triée par fitness(croissant)
 def evolution():
@@ -396,14 +404,17 @@ n_selc = 20     # nombre d'individus séléctionnés dans la population pour êt
 a = 0.5         # paramètre dans [0,1] qui gére la probabilité qu'un individu soit séléctionné en fonction de son rang dans la pop(0 : equiproba)
 m = 40          # nombre d'individues créés par mutation génétique pour 1 individu
 nb_crv = 40     # nombre de crossover fait par gen
-gen = 1000      # nombre de générations
-max_F = 2       # maximum d'un mouvement 
-c_G = 0.01       # bonus for G height
-c_size = 0      # malus for size of Seq
+gen = 2000      # nombre de générations
+
+
+c_G = 0.01      # bonus for G height
+c_size = 0.01   # malus for size of Seq
+fitness_w = {'c_G' : c_G,'c_size'  :c_size}
 
 "Paramètres climber :"
-l_b = 2   # longueur bras
-l_j = 3  # longueur jambe
+l_b = 2         # longueur bras
+l_j = 3         # longueur jambe
+max_F = 2       # longueur maximum d'un mouvement
 
 "Paramètre de la voie"
 Holds = [(1,-1),(-1,-1),(0,0.8),(-1,0.5),(2.5,2.75),(3,5),(2,5),(0,4),(0,2),(1.5,1),(1,3),(1.5,7),(3,7),(2,10)]  # liste des coordonnées des prises, tel que Holds[:4] prises de départ (*) et Holds[-1] la prise d'arrivée
@@ -421,3 +432,5 @@ time = [i for i in range(round(1 + T_tot/dt)) ]  # Liste des instants de temps (
 evolution()
 
 # ---------------DATA--------------- #
+
+Seq_1 = {2: {'p': 2, 'F': [0.043249311782038724, 1.2042239545735405]}, 4: {'p': 2, 'F': [0.9099790623973382, 1.2662716915534975]}, 8: {'p': 0, 'F': [-3.4136053583543084, 1.4070999259143537]}, 7: {'p': 1, 'F': [0.2281471018304348, 1.6530931364171932]}, 6: {'p': 3, 'F': [0.3159128079796567, 0.6870167425413657]}, 13: {'p': None, 'F': [0.37851111676786664, 0.7682451131851789]}, 14: {'p': 3, 'F': [0.742372791344491, 3.1047489419382717]}, 22: {'p': 0, 'F': [1.392240550340946, 2.16746686708717]}, 21: {'p': None, 'F': [-0.35303858497108676, 0.5290992626333566]}, 30: {'p': None, 'F': [0.022801968215212243, 0.029979058536845737]}, 23: {'p': None, 'F': [0.4643464585464133, 1.3335918440182704]}, 32: {'p': 2, 'F': [-0.02913755640206478, 1.5008961115909727]}, 15: {'p': None, 'F': [0.249573259964894, 0.7074729567033735]}, 18: {'p': 1, 'F': [2.2260322228509555, 0.7827027767325359]}, 17: {'p': 1, 'F': [0.6790614373934062, 1.557106628702188]}, 11: {'p': 0, 'F': [1.234401120439349, 1.1311900081407913]}, 1: {'p': None, 'F': [0.39754390597253575, 1.7571796748344044]}, 35: {'p': None, 'F': [-0.24059004003306492, 1.0400134471362288]}, 38: {'p': 2, 'F': [-0.3588592920567122, 1.8436904043102993]}, 40: {'p': 3, 'F': [0.3387539063845839, 3.646473084674672]}, 39: {'p': 0, 'F': [2.3510828817856675, 1.7009084703087958]}, 36: {'p': 2, 'F': [0.9338763821682479, 0.6847556705759446]}, 42: {'p': None, 'F': [0.9911646906166713, 1.8718608932124148]}, 43: {'p': 3, 'F': [0.3030638468314567, 1.203898711536405]}, 45: {'p': 0, 'F': [-0.9205327948299565, 1.7958210667409429]}, 46: {'p': 2, 'F': [0.5008920921111522, 2.700162167395744]}, 47: {'p': 1, 'F': [-0.3526511078354527, 2.238994966475196]}, 26: {'p': 1, 'F': [-0.3538211002231114, 2.136736857762457]}, 49: {'p': None, 'F': [0.49998026655085703, 1.904578744035208]}}
