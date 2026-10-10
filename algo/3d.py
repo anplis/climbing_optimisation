@@ -15,7 +15,7 @@ Ainsi, un grimpeur pourra faire le mouvement (que l'on effectura seulement si il
 Autres caractéristiques du modèle :
  - Le grimpeur doit toujours avoir au moins 2 points d'accroche au mur (ce qui est réaliste pour la plupart des mouvements en escalade)
  - On considère une grimpe dite statique, sans mouvement dynamique avec des mouvement instananés pour l'instant
- - les pieds sont toujours en dessous de G
+ - les pieds sont toujours en dessous de J
 """
 
 # ---------------IMPORT--------------- #
@@ -30,188 +30,235 @@ import copy as copy
 # ---------------CLASS--------------- #
 
 # Interval_l = [0, l_max]
-
+class InvalidMove(Exception):
+    pass
+    
 class point :
-    def __init__(self, x, y, z, l, Interval_l, do_graph=False):
-        self.hold = False
+    def __init__(self, x, y, z, Interval_l : float, do_graph=False):
+        self.hold = None
         self.x = x
         self.y = y
         self.z = z
-        self.l = l
         
         self.Interval_l = Interval_l
         
         if do_graph:
-            self.scatter, = ax.plot([self.x], [self.y], [self.z], 'o', color="blue", markersize=6)
+            self.scatter, = ax.plot([self.x], [self.y], [self.z], 'o', color="black", markersize=6)
     
-    def update_graph(self):
+    def update_graph_p(self):
         self.scatter.set_data_3d([self.x], [self.y], [self.z])
-    
+
     def move(self, F):
-        self.hold = False
         self.x += F[0]
         self.y += F[1]
         self.z += F[2]
-    
-    def hold_hold(self):
-        if any(distance(h, (self.x, self.y, self.z)) <= eps for h in Holds):
-            self.hold = True
-    
-    def drop_hold(self):
-        self.hold = False
-    
-        
+          
 class climber :
-    def __init__(self, x = 0., y = 0., z = 0., do_graph = False):
-        self.fit = float('inf')
-        self.Seq = {}   # Seq = {t : {"p": index_p or None, "F" : F}}, None is for G move
-        
-        self.G = [x, y, z]
+    def __init__(self, XYZ_J, XYZ_B, do_graph = False):
+        self.J = XYZ_J
+        self.B = XYZ_B
+
         self.list_point = []
         
         self.do_graph = do_graph
-        if do_graph : # create a graph point
-            self.scatter, = ax.plot([self.G[0]], [self.G[1]], [self.G[2]], 'o', color="red", markersize=6)
-    
-    def reset(self):
-        reset_all_points(self)
-    
-    
-    def add_F(self, T, p, F):
-        if T <= time[-1]:
-            self.Seq[T] = {"p" : p, "F" : F}
-    
-    def add_F_rd(self):
-        T = rd.choice(range(len(time)))
-        if rd.random() > 0.5:   # move G
-            F = [rd.uniform(-max_F, max_F) for _ in range(3)]
-            self.add_F(T, None, F)
-        else:   # move point to hold
-            p_index = rd.choice(range(len(self.list_point)))
-            if self.list_point[p_index].hold and sum(q.hold for q in self.list_point) <= 2: # si pas assez de points accrochés
-                pass
-            possible_hold_F = self.possible_move_to_hold(T, p_index)
-            if possible_hold_F:
-                F = rd.choice(possible_hold_F)
-                self.add_F(T, p_index, F)
-    
-    def possible_move_to_hold(self, T_new, p_index):
-        # On simule la grimpe jusqu'au temps T_new
-        self.reset()
-        try:
-            for T in sorted(self.Seq):
-                if T >= T_new:
-                    break
-            
-                self.apply_move(self.Seq[T])
-        except NameError:       # arrêt au premier mouvement impossible
-            pass
         
-        p = self.list_point[p_index]
-        F_possible = [[h[0] - p.x, h[1] - p.y, h[2] - p.z] for h in Holds if distance(h, (p.x, p.y, p.z)) > 1e-9 and self.is_valid(p, self.G, h)]  # 1e-9 pour pas que ce soit la même prise
-        return [F for F in F_possible if self.if_possible_move_p(p,F)]
-    
-    def del_F_rd(self):    # supprime un mouvement au hasard
-        Ts = [T for T in self.Seq if self.Seq[T]]      # instants qui ont encore des mouvements
-        if Ts:
-            T = rd.choice(Ts)
-            self.Seq.pop(T)  # retire un seul mouvement
-    
-    def change_move_rd(self):
-        if self.Seq:
-            T = rd.choice(list(self.Seq.keys()))
+        if do_graph :
+            self.scatter_J = ax.plot([self.J[0]], [self.J[1]], [self.J[2]], 'o', color="red", markersize=6)[0]
+            self.scatter_B = ax.plot([self.B[0]], [self.B[1]], [self.B[2]], 'o', color="red", markersize=6)[0]
+            self.line_JB = ax.plot([self.J[0], self.B[0]], [self.J[1], self.B[1]], [self.J[2], self.B[2]], color="blue", linewidth=2)[0]
 
-            if rd.random() < 0.5:   # change le temps du mouvement
-                r = max(1, len(time)//10)  # arbitraire, correspond à 10% de la durée totale de la simulation
-                new_T = rd.choice(range(max(0, T-r), min(len(time), T+r)))
-                if new_T != T:
-                    self.Seq[new_T] = self.Seq[T]
-                    self.Seq.pop(T)
-            else:   # change le vecteur de déplacement du mouvement
-                move = self.Seq[T]
-                self.Seq[T]["F"] = [f + rd.uniform(-0.1, 0.1)*max_F for f in move["F"]]
         
-    
-    def add_point(self, x, y, z, l, Interval_l):
-        self.list_point.append(point(x,  y, z, l , Interval_l, self.do_graph))  
+    def add_point(self, x, y, z, Interval_l):
+        self.list_point.append(point(x,  y, z, Interval_l, self.do_graph))  
         
         if self.do_graph:
             # create a graph line between G and the new point
             i = len(self.list_point) - 1    # index of the point added
-            self.list_point[i].line, = ax.plot([self.G[0], self.list_point[i].x], [self.G[1], self.list_point[i].y], [self.G[2], self.list_point[i].z], color="blue", linewidth=2)
+            if i < 2:   # les jambes
+                self.list_point[i].line = ax.plot([self.J[0], self.list_point[i].x], [self.J[1], self.list_point[i].y], [self.J[2], self.list_point[i].z], color="blue", linewidth=2)[0]
+            else:   # les bras
+                self.list_point[i].line = ax.plot([self.B[0], self.list_point[i].x], [self.B[1], self.list_point[i].y], [self.B[2], self.list_point[i].z], color="blue", linewidth=2)[0]
     
     def apply_move(self, move):
-        if move['p'] is None:
-            self.move_G(move['F'])
-        else:
-            self.move_p(move['p'],move['F'])
+        if move["type"] == 'rot':
+            self.move_rot(move["i_bdy"], move['r'])
+        elif move["type"] == 'body':
+            self.move_body(move["F"])
+        elif move["type"] == 'p':
+            self.move_p(move["i_p"], move["F"])
+        elif move["type"] == 'to_hold':
+            self.move_to_hold(move["i_p"], move["i_h"], move["hold"])
+        
+        if not self.is_valid():
+            raise InvalidMove
     
-    def move_G(self, F):
-        if self.is_possible_move_G(F):
-            self.G[0] += F[0]
-            self.G[1] += F[1]
-            self.G[2] += F[2]
-            for p in self.list_point:
-                x = p.x - self.G[0]
-                y = p.y - self.G[1]
-                z = p.z - self.G[2]
-                p.l = ma.hypot(x, y, z)   # met à jour l du point
-        else:
-            raise NameError('not possible')
-    
+    def move_body(self, F):
+        for i in range(3):
+            self.J[i] += F[i]
+            self.B[i] += F[i]
 
-    def move_p(self, index_point, F):
-        if self.if_possible_move_p(self.list_point[index_point], F):
-            self.list_point[index_point].move(F)    # met à jour coord du point
-            
-            x = self.list_point[index_point].x - self.G[0]  # coord du point par rapport à G
-            y = self.list_point[index_point].y - self.G[1]
-            z = self.list_point[index_point].z - self.G[2]
-
-            self.list_point[index_point].hold_hold()  # essaie de s'accrocher à une prise si possible
-            
-            self.list_point[index_point].l = ma.sqrt(x**2 + y**2 + z**2)   # met à jour l et teta du point
+    def move_p(self, i_p, F):
+        self.list_point[i_p].move(F)    # met à jour coord du point
+        self.list_point[i_p].hold = None
+         
+    
+    def move_to_hold(self, i_p, i_h, hold):
+        self.list_point[i_p].x = hold[0]  
+        self.list_point[i_p].y = hold[1]
+        self.list_point[i_p].z = hold[2]
+        self.list_point[i_p].hold = i_h
+    
+    def move_rot(self, i_bdy, r):
+        theta, phi = r
+        moving, fixed = (self.J, self.B) if i_bdy == 0 else (self.B, self.J)
+        
+        v = [moving[k] - fixed[k] for k in range(3)]
+        v_rot = rotate_vector(v, theta, phi)
+        
+        new = [fixed[k] + v_rot[k] for k in range(3)]
+        
+        if i_bdy == 0:
+            self.J = new
         else:
-            raise NameError('not possible')
+            self.B = new
     
-    def is_possible_move_G(self, F):
-        G_new = [self.G[0] + F[0], self.G[1] + F[1], self.G[2] + F[2]]
-        return all(self.is_valid(p, G_new, (p.x, p.y, p.z)) for p in self.list_point)
     
-    def if_possible_move_p(self, p, F):
-        nb_hold = sum(1 for q in self.list_point if q.hold)
-        if p.hold and nb_hold <= 2:
+    def is_valid(self): # renvoie si la position actuel de C est valide sans la modifier
+        l_bdy = ma.hypot(*(self.B[j] - self.J[j] for j in range(3)))
+        
+        hold_held = [p.hold for p in self.list_point if p.hold is not None]
+        if len(set(hold_held)) != len(hold_held):          # deux points sur la même prise
             return False
-        return self.is_valid(p, self.G, (p.x + F[0], p.y + F[1], p.z + F[2]))
-    
-    def is_valid(self, p, G, pos):
-        x, y, z = pos[0] - G[0], pos[1] - G[1], pos[2] - G[2] # position relative à G
-        l = ma.hypot(x, y, z)
-        if not (p.Interval_l[0] <= l <= p.Interval_l[1]):
-            return False
-        if p in self.list_point[:2] and z > 0:  # les jambes ne doivent pas être au dessu de centre G
+        
+        for p in self.list_point:
+            G = self.J if self.list_point.index(p) < 2 else self.B
+            x,y,z = (p.x - G[0], p.y - G[1], p.z - G[2])
+            
+            l_p = ma.hypot(x, y, z)
+            x_b,y_b,z_b = (self.B[i] - self.J[i] for i in range(3))
+            denom = ((ma.sqrt(x**2 + y**2 + z**2))*(ma.sqrt(x_b**2 + y_b**2 + z_b**2)))
+            nom = (x*x_b + y*y_b + z*z_b)
+            if denom>1e-5 and -1<= nom/denom <= 1:
+                theta = ma.acos(nom/denom)
+            else:
+                theta = 0
+            
+            if not (p.Interval_l[0] <= l_p <= p.Interval_l[1]): # si la taille du bras est raisonnable
+                return False
+            if abs(l_bdy - l_dos)>1e-4:    # la longeur du dos doit rester la même
+                return False
+            if self.B[2] < self.J[2]:   # le bassin doit être plus bas que les épaules
+                return False
+            if self.list_point.index(p) < 2 and not angle_in(theta, [ma.pi/2,3*ma.pi/2]):    # angle cohérent des jambes(inférieure au plan normal du dos en J)
+                return False
+        if not self.has_min_hold():    # si moins de deux membres accrochés dont au moins une main
             return False
         return True
     
+    def has_min_hold(self):
+        if sum(1 if p.hold is not None else 0 for p in self.list_point[2:]) == 0:    # si aucune main est accrochée
+            return False
+        if sum(1 if p.hold is not None else 0 for p in self.list_point) < 2:    # si moins de 2 accroches au total
+            return False
+        return True
+                
+            
+    
     def update_graph(self):
-        self.scatter.set_data_3d([self.G[0]], [self.G[1]], [self.G[2]])
+        self.scatter_J.set_data_3d([self.J[0]], [self.J[1]], [self.J[2]])
+        self.scatter_B.set_data_3d([self.B[0]], [self.B[1]], [self.B[2]])
+
+        self.line_JB.set_data_3d([self.J[0], self.B[0]],[self.J[1], self.B[1]], [self.J[2], self.B[2]])
         
-        for p in self.list_point :
-            p.update_graph()                                            # update points
-            p.line.set_data_3d([self.G[0], p.x], [self.G[1], p.y], [self.G[2], p.z])  # update lines
+        for i in range(len(self.list_point)):
+            self.list_point[i].update_graph_p()
+            
+            parent = self.J if i<2 else self.B
+            p = self.list_point[i]
+            p.line.set_data_3d([parent[0], p.x],[parent[1], p.y], [parent[2], p.z])
         
         fig.canvas.draw()
         fig.canvas.flush_events()
 
+class Seq:
+    def __init__(self, ini_seq = None):
+        self.Seq = copy.deepcopy(ini_seq) if ini_seq is not None else {}  # Seq = {t : {"p": index_p or None, "F" : F}}, None is for G move
+        self.fit = 1e+5
+        
+    def add_F(self, T : int,  rd_mut : dict):
+            if T <= time[-1]:
+                self.Seq[T] = rd_mut    # F = {"type": ..., "move" : {"i_bdy": ,"r" : [theta,phi]} or {"i_p": , "F": } or {"i_p": , "i_h", "hold":} or {"F": }}
+        
+    def rd_mut(self):
+        T_new = rd.choice(range(len(time)))
+        
+        if rd.random()>0.3:
+            C = init_climber()
+            try :
+                self.simu_to_T(C,T_new-1)   # on se place à l'intant d'avant l'ajout du mouvement
+            except InvalidMove:
+                return
+            
+            rd_mut = rd.choice([self.rot, self.to_hold, self.p, self.body])
+            Dict = rd_mut(C)
+            if Dict is not None:
+                self.add_F(T_new, Dict)
+        else:
+            self.del_rd()
+        
+    def simu_to_T(self, C , T_new):
+        # On simule la grimpe jusqu'au temps T_new
+        for T in sorted(self.Seq.keys()):
+            if T > T_new:
+                break
+        
+            C.apply_move(self.Seq[T])
+    
+    def rot(self, C):
+        i_bdy = rd.choice([0,1])
+        r = [rd.uniform(-max_theta,max_theta), rd.uniform(-max_phi,max_phi)]
+        C.move_rot(i_bdy,r)
+        if C.is_valid():
+            return {"type":"rot", "i_bdy" : i_bdy, "r" : r}
+        
+    def to_hold(self, C):
+        i_p = rd.randrange(len(C.list_point))
+        h_possible = []
+        for i_h in range(len(Holds)):
+            h = Holds[i_h]
+            C.move_to_hold(i_p, i_h, h)
+            if C.is_valid():
+                h_possible.append((h, i_h))
+        
+        if h_possible:
+            h, i_h =  rd.choice(h_possible)
+            return {"type": "to_hold", "i_p" : i_p, "i_h" : i_h, "hold" :h}
+    
+    def p(self, C):
+        i_p = rd.randrange(len(C.list_point))
+        F = [rd.uniform(-max_F, max_F) for _ in range(3)]
+        C.move_p(i_p,F)
+        if C.is_valid():
+            return {"type" : "p", "i_p" : i_p, "F" : F}
+    
+    def body(self,C):
+        F = [rd.uniform(-max_F, max_F) for _ in range(3)]
+        C.move_body(F)
+        if C.is_valid():
+            return {"type" : "body", "F" : F}
+    
+    def del_rd(self):    # supprime un mouvement au hasard
+        if self.Seq:
+            self.Seq.pop(rd.choice(list(self.Seq.keys())))
 
+    
 # ---------------GRAPH--------------- #
 
 # Création de la figure :
 fig = plt.figure()
 ax = fig.add_subplot(projection='3d')
-def create_fig():
+def set_fig():
     ax.set_title("Simulation d'escalade")
-    size = max(abs(z) for XYZ in Holds for z in XYZ)
     marge = 1
     for lim,i in zip([ax.set_xlim,ax.set_ylim,ax.set_zlim],[0,1,2]):
         lim(min(h[i] for h in Holds)-marge,max(h[i] for h in Holds)+marge)
@@ -227,29 +274,29 @@ def create_fig():
     plt.show()
 
 def show_holds():
-    for h in Holds:
-        ax.plot([h[0]], [h[1]], [h[2]], 'o', color="green")
+    x,y,z = [[h[i] for h in Holds] for i in range(3)]
+    ax.scatter(x,y,z, c='green', marker='X', s=50, depthshade=False)
 
-def simulation(Seq):
-    show_holds()
-    create_fig()
-    C = init_climber(do_graph=True)      # créé une seule fois
-    while True:
-        C.reset()
+def simulation(Seq, n_loop = -1):
+    while plt.fignum_exists(fig.number) and (n_loop < 0 or n_loop > 0):
+        ax.clear()
+        set_fig()
+        show_holds()
+        
+        C = init_climber(do_graph=True)
         C.update_graph()
-        plt.pause(1)
-        stop = False
+        plt.pause(0.5)
+        
         for T in sorted(Seq):
             try:
                 C.apply_move(Seq[T])
-            except NameError:
-                stop = True
+            except InvalidMove:
                 break
             C.update_graph()
             plt.pause(dt)
-            if stop:
-                break
         plt.pause(1)
+        n_loop -= 1
+    plt.ioff()
 
 # ---------------FONCTIONS--------------- #
 
@@ -266,150 +313,159 @@ def angle_in(teta, Interval):   # si teta est dans a,b modulo 2pi
     a,b = Interval
     return (teta - a)%(2*ma.pi) <= (b - a)%(2*ma.pi)
 
-def line_intersection(line1, line2):  # line1 = [(x1,y1,z1),(x2,y2,z2)], line2 = [(x3,y3,z3),(x4,y4,z4)]
-    P1, P2 = line1[0], line2[0]
-    d1 = [line1[1][i] - line1[0][i] for i in range(3)]
-    d2 = [line2[1][i] - line2[0][i] for i in range(3)]
-    w = [P2[i] - P1[i] for i in range(3)]
+def rotate_vector(v, theta, phi):
+    """Rotation d'angle theta autour de Z, puis d'angle phi autour de Y (conserve la norme)."""
+    x, y, z = v
+    ct, st = ma.cos(theta), ma.sin(theta)
+    cp, sp = ma.cos(phi), ma.sin(phi)
 
-    def cross(a, b):
-        return [a[1]*b[2] - a[2]*b[1],
-                a[2]*b[0] - a[0]*b[2],
-                a[0]*b[1] - a[1]*b[0]]
+    # Rz(theta)
+    x1 = ct * x - st * y
+    y1 = st * x + ct * y
+    z1 = z
 
-    def dot(a, b):
-        return sum(a[i] * b[i] for i in range(3))
+    # Ry(phi)
+    return [cp * x1 + sp * z1, y1,-sp * x1 + cp * z1]
 
-    n = cross(d1, d2)
-    n2 = dot(n, n)
+def middle_seg(A,B):
+    AB = [B[i]-A[i] for i in range(len(A))]
+    return [A[i] + AB[i]/2 for i in range(len(A))]
 
-    # paramètres des points les plus proches sur chaque droite
-    t = dot(cross(w, d2), n) / n2
-    s = dot(cross(w, d1), n) / n2
-    A = [P1[i] + t * d1[i] for i in range(3)]
-    B = [P2[i] + s * d2[i] for i in range(3)]
-
-    # si les droites sont gauches, on prend le milieu du segment le plus court
-    return tuple((A[i] + B[i]) / 2 for i in range(3))
+def atan_c(x):
+    return ma.atan(x)*2/ma.pi
 
 # ---------------GENETIC--------------- #
 
 def init_climber(do_graph = False):
-    G, l_points = pos_init()
-    C = climber(G[0], G[1], G[2], do_graph)
+    XYZ_J, XYZ_B = body_pos_init()
+    C = climber(XYZ_J, XYZ_B, do_graph)
     for i in range(4):
-        l = l_points[i]
         l_max = l_j if i < 2 else l_b
-        C.add_point(Holds[i][0], Holds[i][1], Holds[i][2], l, [0,l_max])
-        C.list_point[i].hold_hold()  # on accroche les points de départ aux prises
-    return C
+        C.add_point(Holds[i][0], Holds[i][1], Holds[i][2], [0,l_max])
+        C.list_point[i].hold = i  # on accroche les points de départ aux prises
+    if C.is_valid():
+        return C
+    else:
+        raise InvalidMove
 
-def reset_all_points(C):
-    G, l_points = pos_init()
-    C.G = G
-    for i in range(4):
-        C.list_point[i].x = Holds[i][0]
-        C.list_point[i].y = Holds[i][1]
-        C.list_point[i].z = Holds[i][2]
-        C.list_point[i].l = l_points[i]
-        C.list_point[i].hold_hold()  # on accroche les points de départ aux prises
+def body_pos_init():
+    J_M = middle_seg(Holds[0], Holds[1])
+    B_M = middle_seg(Holds[2], Holds[3])
 
-def pos_init():
-    G = line_intersection([(Holds[0][0], Holds[0][1], Holds[0][2]), (Holds[3][0], Holds[3][1], Holds[3][2])], [(Holds[1][0], Holds[1][1], Holds[1][2]), (Holds[2][0], Holds[2][1], Holds[2][2])])
-    G_x = G[0]
-    G_y = G[1]
-    G_z = G[2]
+    M = middle_seg(J_M, B_M)
 
-    l_points = []
-    # jambes :
-    x_jd, y_jd, z_jd = Holds[0][0]-G_x, Holds[0][1]-G_y, Holds[0][2]-G_z
-    l_points.append(ma.hypot(x_jd, y_jd, z_jd))
-    x_jg, y_jg, z_jg = Holds[1][0]-G_x, Holds[1][1]-G_y, Holds[1][2]-G_z
-    l_points.append(ma.hypot(x_jg, y_jg, z_jg))
+    direction = [B_M[i] - J_M[i] for i in range(3)]
+    norm = ma.sqrt(sum(d**2 for d in direction))
 
-    # bras :
-    x_bd, y_bd, z_bd = Holds[2][0]-G_x, Holds[2][1]-G_y, Holds[2][2]-G_z
-    l_points.append(ma.hypot(x_bd, y_bd, z_bd))
-    x_bg, y_bg, z_bg = Holds[3][0]-G_x, Holds[3][1]-G_y, Holds[3][2]-G_z
-    l_points.append(ma.hypot(x_bg, y_bg, z_bg))
+    if norm > 0:
+        direction = [d / norm for d in direction]
+    else:
+        direction = [0, 0, 1]  # Direction verticale par défaut
 
-    return [G_x, G_y, G_z], l_points
+    J = [M[i] - direction[i]*l_dos/2 for i in range(3)]
+    B = [M[i] + direction[i]*l_dos/2 for i in range(3)]
 
-def init_pop(P = []) -> list :     # créé une population initiale de taille n
+    return J, B
+
+def init_pop() :     # créé une population initiale de taille n
+    new_P = []
     for _ in range(n):
-        C = init_climber()
+        ind = Seq()
         for _ in range(rd.randint(1,5)):
-            C.add_F_rd()
-        P.append(C)
-    return insert([], P)
+            ind.rd_mut()
+        if ind.Seq:
+            new_P.append(ind)
+    P = []
+    insert(P,new_P)
+    return P
+    
 
 def mutation(selected : list) -> list :     # créé m variantes de chaque individu par mutations génétiques et des crossover
-    new_Cs = []
-    for C in selected:
+    Inds = []
+    for ind in selected:
         for _ in range(m):
-            new_C = copy.deepcopy(C)
-            rd.choices([new_C.add_F_rd, new_C.del_F_rd, new_C.change_move_rd],weights=[1,1,3])[0]()
-            if new_C.Seq != C.Seq:
-                new_Cs.append(new_C)
-                
-    for _ in range(int(nb_crv)):
-        C1, C2 = rd.sample(selected, k = 2) # tirage sans remise de 2 individus
-        new_C = crossover(C1,C2)
-        if new_C.Seq != C1.Seq and new_C.Seq != C2.Seq:
-            new_Cs.append(new_C)
-    
-    return new_Cs
+            essai = 0
+            new_ind = copy.deepcopy(ind)
+            while essai<20 and (new_ind is None or new_ind.Seq == ind.Seq):
+                essai += 1
+                new_ind = copy.deepcopy(ind)
+                for _ in range(rd.randint(1,5)):
+                    new_ind.rd_mut()
+            
+            if essai!=20:
+                Inds.append(new_ind)
+            
+    for _ in range(nb_crv):
+        len_ini = len(Inds)
+        essai = 0
+        while len_ini == len(Inds) and essai < 10:
+            ind_1, ind_2 = rd.sample(selected, k = 2) # tirage sans remise de 2 individus
+            if ind_1.Seq != ind_2.Seq:
+                new_ind = crossover(ind_1, ind_2)
+                if new_ind is not None:
+                    Inds.append(new_ind)
+            essai += 1
 
-def crossover(C1,C2):    # Opérateur génétique qui mélange deux individus
-    C_new = init_climber()
+    return Inds
+
+def crossover(ind_1, ind_2):    # Opérateur génétique qui mélange deux individus
+    new_ind = Seq()
     crp_1 = rd.randrange(0,time[-2])
     crp_2 = rd.randrange(crp_1,time[-1])
-    if C1.Seq.keys():
-        for T in C1.Seq.keys() :
+    if ind_1.Seq.keys():
+        for T in ind_1.Seq.keys() :
             if crp_1 >= T or T >= crp_2:
-                C_new.Seq[T] = copy.deepcopy(C1.Seq[T])
-    if C2.Seq.keys():
-        for T in C2.Seq.keys():
+                new_ind.Seq[T] = copy.deepcopy(ind_1.Seq[T])
+    if ind_2.Seq.keys():
+        for T in ind_2.Seq.keys():
             if crp_1 < T < crp_2:
-                C_new.Seq[T] = copy.deepcopy(C2.Seq[T])
-    return C_new
+                new_ind.Seq[T] = copy.deepcopy(ind_2.Seq[T])
+    if new_ind.Seq == ind_1.Seq or new_ind.Seq == ind_2.Seq:
+        return None
+    return new_ind
 
 
-def insert(P, new_ind): # insert les individues dans la pop par croissance de fistness en conservant la taille de Pop (n)
-    for C in new_ind:
+def insert(P, new_inds:list): # insert les individues dans la pop par croissance de fistness 
+    for C in new_inds:
         C.fit = fitness(C)
-        k = 0
-        while k < len(P) and C.fit > P[k].fit:
-            k += 1
-        P.insert(k, C)
-    return P[:n]    # garde une taille de la pop de n
+        if all(C.Seq != D.Seq for D in P):  # tout les individus sont différents
+            k = 0
+            while k < len(P) and C.fit > P[k].fit:
+                k += 1
+            P.insert(k, C)
 
-def fitness(C):
-    C.reset()
-    try:
-        for T in sorted(C.Seq):
-            C.apply_move(C.Seq[T])
-    except NameError:       # arrêt au premier mouvement impossible
-        pass
-    held_z = max(p.z for p in C.list_point if p.hold)
-    height_still = (Holds[-1][2] - held_z)**2
-    if height_still <= 1e-5:
-        c_G = 0
-        c_size = fitness_w['c_size']
-    else:
-        c_G = fitness_w['c_G']
-        c_size = 0
-    return height_still + c_G*distance(C.G, Holds[-1])  + len(list(C.Seq.keys()))*c_size
- 
+def fitness(ind):   # calcul du fitness d'un individu
+    C = init_climber()
+    try :
+        ind.simu_to_T(C, time[-1])
+    except InvalidMove:
+        return 1e5  # +inf
+    
+    max_height_z = max(p.z for p in C.list_point if p.hold is not None)
+    h = (Holds[-1][2] - max_height_z)**2
+    
+    #tot_F = sum(f**2 for move in ind.Seq.values() for f in move['F']) if ind.Seq.values() else 0# somme quadratique des déplacements
+    #nb_mvt = len(list(ind.Seq.keys()))
+    G_stil = distance(C.B, Holds[-1])
+    
+    if h<=1e-2:
+        G_stil = 0
+    return h + c_G*G_stil
+
 # pour chaque gén on créé n_selc*m nouveaux individus par mutations génétiqeus et on les insert dans la pop qui est triée par fitness(croissant)
-def evolution():
-    P = init_pop()
+def evolution(ini_seq = None):
+    if ini_seq is None:
+        P = init_pop()
+    else:
+        P = [Seq(copy.deepcopy(ini_seq)) for _ in range(n)]
+
     for g in range(1,gen+1):  
-        P_selc = rd.choices(P,k = n_selc, weights=[1/(x**a+1) for x in range(n)])
-        P = insert(P,mutation(P_selc))
-        
+        P_selc = rd.choices(P, k = n_selc, weights = [len(P)-x for x in range(len(P))])
+        insert(P, mutation(P_selc))
+        P = P[: n + m + nb_crv]
         if g % 100 == 0:
-            print(g,'ième génération', P[0].fit,'meilleur fitness')
+            print(g,'ième génération : \n- meilleur fitness : ',P[0].fit)
+
     print(P[0].Seq)
     # simulation graphique du meilleur individu
     simulation(P[0].Seq)
@@ -418,25 +474,26 @@ def evolution():
 # ---------------PARAMETRE--------------- #
 
 "Paramètres génétiques :"
-n = 300         # nombre d'individus dans la population
-n_selc = 20     # nombre d'individus séléctionnés dans la population pour être muté, n_selc < n
-a = 0.5         # paramètre dans [0,1] qui gére la probabilité qu'un individu soit séléctionné en fonction de son rang dans la pop(0 : equiproba)
-m = 40          # nombre d'individues créés par mutation génétique pour 1 individu
-nb_crv = 40     # nombre de crossover fait par gen
-gen = 1000      # nombre de générations
- 
+n = 100                 # nombre d'individus dans la population
+n_selc = int(n/2)       # nombre d'individus séléctionnés dans la population pour être muté, n_selc <= n
+m = 5                   # nombre d'individues créés par mutation génétique pour 1 individu
+nb_crv = int(n/2)       # nombre de crossover fait par gen
+gen = 500              # nombre de générations
 
-c_G = 0.01      # bonus for G height
-c_size = 0.01   # malus for size of Seq
-fitness_w = {'c_G' : c_G,'c_size'  :c_size}
+c_G = 0.01          # bonus for G height
+c_size = 0      # malus for size of Seq
+c_totF = 0      # malus pour la quantité de mouvements effectués
 
 "Paramètres climber :"
-l_b = 2         # longueur bras
-l_j = 3         # longueur jambe
-max_F = 2       # longueur maximum d'un mouvement
+l_b = 2             # longueur bras
+l_j = 3             # longueur jambe
+l_dos = 1           # longeur du dos
+max_F = 2.5         # norme maximal d'un mouvement
+max_theta = ma.pi/2 # angle maximal d'un movement de rotation polaire
+max_phi = ma.pi     # angle maximal d'un movement de rotation azimut
 
 "Paramètre de la voie"
-Holds = [(1, 0, -1), (-1, 0, -1), (0, 0, 0.8), (-1, 0, 0.5), (2.5, 0, 2.75), (3, 0, 5), (2, -1, 5), (0, -1, 4), (0, -1, 2), (1.5, -1, 1), (1, -1, 3), (1.5, -1.5, 7), (3, -1.5, 7), (2, -1.5, 10)]#(*): 0 pied d/ 1 pied g/ 2 main d/ 3 main g
+Holds = [(1, 0, -1), (-1, 0, -1), (0, 0, 0.8), (-1, 0, 0.5), (2.5, 0, 2.75), (3, 0, 5), (2, -1, 5), (0, -1, 4), (0, -1, 2), (1.5, -1, 1), (1, -1, 3), (1.5, -1.5, 7), (3, -1.5, 7), (2, -1.5, 9)]#(*): 0 pied d/ 1 pied g/ 2 main d/ 3 main g
 eps = 0.3   # distance max entre un point et une prise pour que le point soit accroché à la prise
 
 "Paramètre temporels"
@@ -450,5 +507,3 @@ time = [i for i in range(round(1 + T_tot/dt)) ]  # Liste des instants de temps (
 evolution()
 
 # ---------------DATA--------------- #
-
-
