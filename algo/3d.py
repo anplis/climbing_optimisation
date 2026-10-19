@@ -25,6 +25,7 @@ import matplotlib.pyplot as plt
 import math as ma
 import random as rd
 import copy as copy
+import multiprocessing as mltp
 
 
 # ---------------CLASS--------------- #
@@ -453,12 +454,12 @@ def crossover(ind_1, ind_2):    # Opérateur génétique qui mélange deux indiv
     return new_ind
 
 
-def insert(P, P_set, new_inds : list, type : str): # insert les individues dans la pop par croissance de fistness 
+def insert(P, P_set, new_inds : list, type : str, height_ref): # insert les individues dans la pop par croissance de fistness 
     for ind in new_inds:
         if type=="height":
             ind.fit = fitness(ind)
         elif type=="opti":
-            ind.fit = fitness_opti(ind,height_ref)
+            ind.fit = fitness_opti(ind, height_ref)
         
         k = seq_key(ind)
         if k not in P_set:# tout les individus dans la population sont différents
@@ -475,7 +476,7 @@ def fitness(ind : Seq, only_height = False) -> float:   # calcul du fitness d'un
     except InvalidMove:
         return float('inf')
     
-    max_height_z = max(p.z for p in C.list_point)
+    max_height_z = max(p.z for p in C.list_point if p.hold)
     h_still = (Holds[-1][2] - max_height_z)**2
     if only_height:
         return h_still
@@ -493,7 +494,7 @@ def move_cost(move): #  pour tout les mvt sauf to_hold(dépend de la position ac
         return move["r"][0]**2 + move["r"][1]**2
     return 0 
 
-def fitness_opti(ind,high_ref): # évalue si l'individu à réussi à optimiser la grimpe tout en gardant au minimu la même hauteur final h
+def fitness_opti(ind, high_ref): # évalue si l'individu à réussi à optimiser la grimpe tout en gardant au minimu la même hauteur final h
     C = init_climber()
     tot_F = 0
     try :
@@ -510,16 +511,14 @@ def fitness_opti(ind,high_ref): # évalue si l'individu à réussi à optimiser 
     except InvalidMove:
         return float('inf')  # +inf
     
-    max_height_z = max(p.z for p in C.list_point)
+    max_height_z = max(p.z for p in C.list_point if p.hold)
     h_still = (Holds[-1][2] - max_height_z)**2
     
     nb_mvt = len(list(ind.Seq.keys())) if ind.Seq.keys() else 0
     
-    #if h_still > high_ref + 1e-6:
-    #    return float('inf')
-    return c_nb_mvt*nb_mvt + c_totF*tot_F + c_height*h_still
-
-height_ref = float('inf')
+    if h_still > high_ref + 1e-6:
+        return float('inf')
+    return c_nb_mvt*nb_mvt + c_totF*tot_F
 
 def seq_key(ind):
     return repr(sorted(ind.Seq.items()))    # chaine de caractère
@@ -527,24 +526,20 @@ def seq_key(ind):
 # pour chaque gén on créé n_selc*m nouveaux individus par mutations génétiqeus et on les insert dans la pop qui est triée par fitness(croissant)
 def evolution(type, ini_P):
     # initialisation
-    print("\t", type, "evolution :")
-    
-    if type=='opti':
-        global height_ref
-        height_ref = fitness(ini_P[0], True)     # avant de réinsérer
+    height_ref = fitness(ini_P[0], True)     # avant de réinsérer
 
     P_set = set()
     P = []
-    insert(P, P_set, ini_P, type) # we need to reinsert to evaluate the fit with thid type
+    insert(P, P_set, ini_P, type, height_ref) # we need to reinsert to evaluate the fit with thid type
 
     # loop
     for g in range(1,gen+1):  
         P_selc = rd.choices(P, k = min(n_selc,len(P)), weights = [1/x for x in range(1,len(P)+1)])
-        insert(P, P_set, mutation(P_selc), type)   # permet de trier les individues selon leur fit, dépend donc de type
+        insert(P, P_set, mutation(P_selc), type, height_ref)   # permet de trier les individues selon leur fit, dépend donc de type
         P = P[: n + n_m + nb_crv]
         
         if g % 100 == 0:
-            print("\t\t",g,'ième génération : meilleur fitness : ',P[0].fit)
+            print("\t\t",g,'ième génération : best fitness ',type,' : ',P[0].fit)
             #print(P[0].Seq)
 
     #print(P[0].Seq)
@@ -555,11 +550,11 @@ def evolution(type, ini_P):
 
 "Paramètres génétiques :"
 n = 200                 # nombre d'individus dans la population
-n_selc = int(n/2)       # nombre d'individus séléctionnés dans la population pour être muté, n_selc <= n
-n_m = 10                   # nombre d'individues créés par mutation génétique pour 1 individu
-max_mut = 7               # nombre maximal de mutations faites sur un individu
+n_selc = int(n/4)       # nombre d'individus séléctionnés dans la population pour être muté, n_selc <= n
+n_m = 5                   # nombre d'individues créés par mutation génétique pour 1 individu
+max_mut = 5               # nombre maximal de mutations faites sur un individu
 nb_crv = int(n/5)       # nombre de crossover fait par gen
-gen = 1000              # nombre de générations
+gen = 500              # nombre de générations
 
 c_height = 1
 c_B = 0.01              # bonus for G height
@@ -567,10 +562,10 @@ c_nb_mvt = 1          # malus for size of Seq
 c_totF = 0.1              # malus pour la quantité de mouvements effectués
 
 "Paramètres climber :"
-masse = 60              # masse(kg)
+masse = 60          # masse(kg)
 l_b = 1             # longueur bras
-l_j = 1.5             # longueur jambe
-l_dos = 0.7           # longeur du dos
+l_j = 1.5           # longueur jambe
+l_dos = 0.7         # longeur du dos
 max_F = 2.5         # norme maximal d'un mouvement
 max_theta = ma.pi/2 # angle maximal d'un movement de rotation polaire
 max_phi = ma.pi     # angle maximal d'un movement de rotation azimut
@@ -587,22 +582,50 @@ vect_h = [tuple(c / ma.hypot(*d) for c in d) for d in dir_h]
 vect_Fmax_h = [[Fmax*vect[i] for i in range(3)] for Fmax,vect in zip(Fmax_h,vect_h)]
 
 "Paramètre temporels"
-T_tot = 5  # Durée totale de la simulation en secondes
+T_tot = 10  # Durée totale de la simulation en secondes
 dt = 0.1    # une puissance de 10 négative
 time = [i for i in range(round(1 + T_tot/dt)) ]  # Liste des instants de temps (int)
 
 
 # ---------------MAIN--------------- #
 
-P = init_pop(10)
-for i in range(5):
-    print("MODULE :",i)
-    P = evolution("height", P[:10]) # garde les 10 meilleurs ind
-    P = evolution("opti", P[:10])   
+def main():
+    P = init_pop(10)
+    for i in range(5):
+        print("MODULE :",i)
+        P = evolution("height", P) # garde les 10 meilleurs ind
+        P = evolution("opti", P)   
 
-print(P[0].Seq)
-simulation(P[0].Seq)
+    print(P[0].Seq)
+    simulation(P[0].Seq)
 
-# --------------DATA---------------- #
 
-Seq_1 = {49: {'type': 'p', 'i_p': 3, 'F': [-0.5830063647708417, -0.09941911473989773, 0.8180256651073821]}, 47: {'type': 'body', 'F': [0.22562568916009695, 0.21105309108034653, 0.2749452300642492]}, 46: {'type': 'body', 'F': [-0.2787028711923609, -0.041726976467465704, 0.2165004752344064]}, 2: {'type': 'body', 'F': [-0.15480412637151364, -0.17862468143734134, 0.14860124032475097]}, 5: {'type': 'rot', 'i_bdy': 1, 'r': [1.2415086523966878, 0.31873400911899274]}, 13: {'type': 'to_hold', 'i_p': 0, 'i_h': 1, 'hold': [-0.7, 0.0, -0.7]}, 41: {'type': 'to_hold', 'i_p': 3, 'i_h': 8, 'hold': [0.0, -0.7, 1.4]}, 43: {'type': 'rot', 'i_bdy': 1, 'r': [0.18069579320898033, -0.5645309021661635]}, 40: {'type': 'to_hold', 'i_p': 2, 'i_h': 8, 'hold': [0.0, -0.7, 1.4]}, 31: {'type': 'rot', 'i_bdy': 0, 'r': [0.6233599289478704, -0.2957145115664872]}, 36: {'type': 'rot', 'i_bdy': 1, 'r': [-0.6775418846747346, -0.455876468489564]}, 29: {'type': 'rot', 'i_bdy': 0, 'r': [-0.1732059481385484, 1.312376056437464]}}
+import os
+cpu = os.cpu_count() - 1
+
+def module(P):
+    P = evolution("height", P)
+    P = evolution("opti", P)
+    P.sort(key=lambda ind: fitness(ind))    # tri par "vrai" fitness (pas celui de opti)
+    return P
+
+spread = 10 # nb of ind spreading to neighbour islands
+def main_mltp():
+    P = init_pop(100)
+    Ps = [copy.deepcopy(P) for _ in range(5)]
+    for i in range(5):
+        print("MODULE :",i)
+        with mltp.Pool() as pool:
+            Ps = pool.map(module, Ps)
+            
+        for i in range(len(Ps)):
+            if i == len(Ps):
+                i = 0
+            Ps[i] = Ps[i][:n-2*spread]
+            Ps[i] += Ps[i-1][:spread] + Ps[i+1:spread]
+
+    print(P[0].Seq)
+    simulation(P[0].Seq)
+
+if __name__ == '__main__':
+    main_mltp()
