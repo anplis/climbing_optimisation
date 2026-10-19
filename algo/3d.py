@@ -128,11 +128,11 @@ class climber :
         l_bdy = ma.hypot(*(self.B[j] - self.J[j] for j in range(3)))
         
         hold_held = [p.hold for p in self.list_point if p.hold is not None]
-        if len(set(hold_held)) != len(hold_held):          # deux points sur la même prise
-            return False
+        #if len(set(hold_held)) != len(hold_held):          # deux points sur la même prise
+        #    return False
         
-        for p in self.list_point:
-            G = self.J if self.list_point.index(p) < 2 else self.B
+        for i_p,p in enumerate(self.list_point):
+            G = self.J if i_p < 2 else self.B
             x,y,z = (p.x - G[0], p.y - G[1], p.z - G[2])
             
             l_p = ma.hypot(x, y, z)
@@ -143,7 +143,7 @@ class climber :
                 return False
             if self.B[2] < self.J[2]:   # le bassin doit être plus bas que les épaules
                 return False
-            if self.list_point.index(p) < 2:    # angle cohérent des jambes(inférieure au plan normal du dos en J)
+            if i_p < 2:    # angle cohérent des jambes(inférieure au plan normal du dos en J)
                 x_b,y_b,z_b = (self.B[i] - self.J[i] for i in range(3))
                 denom = ((ma.sqrt(x**2 + y**2 + z**2))*(ma.sqrt(x_b**2 + y_b**2 + z_b**2)))
                 nom = (x*x_b + y*y_b + z*z_b)
@@ -153,7 +153,7 @@ class climber :
                     theta = 0
                 if not angle_in(theta, [ma.pi/2,3*ma.pi/2]):    
                     return False
-            if self.list_point.index(p) >= 2 and p.hold is not None and l_p > 1e-5:# pour les mains, l'angle formé par le bras doit être dans le cône d'adhérence de la prise qu'il tient
+            if i_p >= 2 and p.hold is not None and l_p > 1e-5:# pour les mains, l'angle formé par le bras doit être dans le cône d'adhérence de la prise qu'il tient
                 xh,yh,zh = vect_h[p.hold]
                 c = (x*xh + y*yh + z*zh)/l_p
                 if ma.acos(max(-1.0, min(1.0, c))) > coef_h[p.hold]:   # hors du cône
@@ -201,25 +201,31 @@ class Seq:
         self.Seq = copy.deepcopy(ini_seq) if ini_seq is not None else {}  # Seq = {t : {"p": index_p or None, "F" : F}}, None is for G move
         self.fit = 1e+5
         
-    def add_F(self, T : int,  rd_mut : dict):
+    def add_F(self, T : int,  rd_mut_dict : dict):
             if T <= time[-1]:
-                self.Seq[T] = rd_mut    # F = {"type": ..., "move" : {"i_bdy": ,"r" : [theta,phi]} or {"i_p": , "F": } or {"i_p": , "i_h", "hold":} or {"F": }}
+                self.Seq[T] = rd_mut_dict    # F = {"type": ..., / "i_bdy": ,"r" : [theta,phi] / "i_p": , "F": / "i_p": , "i_h", "hold": / "F": }
         
     def rd_mut(self):
-        T_new = rd.choice(range(len(time)))
-        
-        if rd.random()>0.3:
+        if rd.random()>0.3: # dans 70% des cas on ajoute un mvt
+            if rd.random()<0.5 and self.Seq.keys(): # dans 5O% des cas on prend le dernier instant du mvt
+                T_new = min(time[-1], max(self.Seq.keys()) + 1) # dernier instanté
+            else:   # sinon un instant ne contenant pas déjà un mvt 
+                # instanté random contenant pas de mvt
+                free_T = [t for t in range(len(time)) if t not in self.Seq]
+                if not free_T:  # si tout les instants sont occupés
+                    return
+                T_new = rd.choice(free_T)
             C = init_climber()
             try :
                 self.simu_to_T(C,T_new-1)   # on se place à l'intant d'avant l'ajout du mouvement
             except InvalidMove:
                 return
             
-            rd_mut = rd.choice([self.rot, self.to_hold, self.p, self.body])
-            Dict = rd_mut(C)
+            rd_mut_func = rd.choice([self.rot, self.to_hold, self.p, self.body])
+            Dict = rd_mut_func(C)
             if Dict is not None:
                 self.add_F(T_new, Dict)
-        else:
+        else:   # dans 30% des cas on en enléve un
             self.del_rd()
         
     def simu_to_T(self, C , T_new):
@@ -387,6 +393,10 @@ def body_pos_init():
     return J, B
 
 def init_pop(n) :     # créé une population initiale de taille n
+    try:
+        init_climber()
+    except InvalidMove:
+        raise InvalidMove("position initiale non valide")
     new_P = []
     for _ in range(n):
         ind = Seq()
@@ -401,21 +411,22 @@ def mutation(selected : list) -> list :     # créé m variantes de chaque indiv
     Inds = []
     for ind in selected:
         for _ in range(n_m):
-            essai = 0
             new_ind = copy.deepcopy(ind)
-            while essai<20 and (new_ind is None or new_ind.Seq == ind.Seq):
-                essai += 1
-                new_ind = copy.deepcopy(ind)
-                for _ in range(rd.randint(1, max_mut)):
-                    new_ind.rd_mut()
             
-            if essai!=20:
-                Inds.append(new_ind)
+            for _ in range(rd.randint(1, max_mut)):
+                new_ind.rd_mut()
+                if new_ind is None:
+                    break
+                
+            if new_ind.Seq == ind.Seq or new_ind is None:
+                continue
+
+            Inds.append(new_ind)
             
     for _ in range(nb_crv):
         len_ini = len(Inds)
         essai = 0
-        while len_ini == len(Inds) and essai < 10:
+        while len(selected)>=2 and len_ini == len(Inds) and essai < 10:
             ind_1, ind_2 = rd.sample(selected, k = 2) # tirage sans remise de 2 individus
             if ind_1.Seq != ind_2.Seq:
                 new_ind = crossover(ind_1, ind_2)
@@ -442,37 +453,39 @@ def crossover(ind_1, ind_2):    # Opérateur génétique qui mélange deux indiv
     return new_ind
 
 
-def insert(P, new_inds:list, type:str): # insert les individues dans la pop par croissance de fistness 
-    for C in new_inds:
+def insert(P, P_set, new_inds : list, type : str): # insert les individues dans la pop par croissance de fistness 
+    for ind in new_inds:
         if type=="height":
-            C.fit = fitness(C)
+            ind.fit = fitness(ind)
         elif type=="opti":
-            C.fit = fitness_opti(C,height_ref)
+            ind.fit = fitness_opti(ind,height_ref)
         
-        if all(C.Seq != D.Seq for D in P):  # tout les individus sont différents
-            k = 0
-            while k < len(P) and C.fit > P[k].fit:
-                k += 1
-            P.insert(k, C)
+        k = seq_key(ind)
+        if k not in P_set:# tout les individus dans la population sont différents
+            P_set.add(k)
+            P.append(ind)
+    
+    P.sort(key=lambda ind: ind.fit)
 
-def fitness(ind, only_height = False):   # calcul du fitness d'un individu
+
+def fitness(ind : Seq, only_height = False) -> float:   # calcul du fitness d'un individu
     C = init_climber()
     try :
         ind.simu_to_T(C, time[-1])
     except InvalidMove:
         return float('inf')
     
-    max_height_z = max(p.z for p in C.list_point if p.hold is not None)
-    height = (Holds[-1][2] - max_height_z)**2
+    max_height_z = max(p.z for p in C.list_point)
+    h_still = (Holds[-1][2] - max_height_z)**2
     if only_height:
-        return height
-    G_stil = distance(C.B, Holds[-1])
+        return h_still
+    B_stil = distance(C.B, Holds[-1])
     
-    if height<=1e-2:
-        G_stil = 0
-    return height + c_G*G_stil 
+    if h_still<=1e-5:    # si touche la dernière prise
+        B_stil = 0
+    return h_still + c_B*B_stil 
 
-def move_cost(move):
+def move_cost(move): #  pour tout les mvt sauf to_hold(dépend de la position actuelle)
     type = move["type"]
     if type in ("p", "body"):
         return sum(f**2 for f in move["F"])
@@ -482,41 +495,52 @@ def move_cost(move):
 
 def fitness_opti(ind,high_ref): # évalue si l'individu à réussi à optimiser la grimpe tout en gardant au minimu la même hauteur final h
     C = init_climber()
+    tot_F = 0
     try :
-        ind.simu_to_T(C, time[-1])
+        for T in sorted(ind.Seq.keys()):
+                    if T > time[-1]:
+                        break
+                    
+                    if ind.Seq[T]["type"] != "to_hold":
+                        tot_F += move_cost(ind.Seq[T])
+                    else : # move "to_hold"
+                        p = C.list_point[ind.Seq[T]["i_p"]]
+                        tot_F += (p.x-ind.Seq[T]["hold"][0])**2 + (p.y-ind.Seq[T]["hold"][1])**2 + (p.z-ind.Seq[T]["hold"][2])**2
+                    C.apply_move(ind.Seq[T])
     except InvalidMove:
-        return 1e5  # +inf
+        return float('inf')  # +inf
     
-    max_height_z = max(p.z for p in C.list_point if p.hold is not None)
-    height = (Holds[-1][2] - max_height_z)**2
+    max_height_z = max(p.z for p in C.list_point)
+    h_still = (Holds[-1][2] - max_height_z)**2
     
-    tot_F = sum(move_cost(move) for move in ind.Seq.values()) if ind.Seq.values() else 0# somme quadratique des déplacements
     nb_mvt = len(list(ind.Seq.keys())) if ind.Seq.keys() else 0
     
-    if height > high_ref:
-        return float('inf')
-    return c_nb_mvt*nb_mvt + c_totF*tot_F
+    #if h_still > high_ref + 1e-6:
+    #    return float('inf')
+    return c_nb_mvt*nb_mvt + c_totF*tot_F + c_height*h_still
 
 height_ref = float('inf')
 
+def seq_key(ind):
+    return repr(sorted(ind.Seq.items()))    # chaine de caractère
+
 # pour chaque gén on créé n_selc*m nouveaux individus par mutations génétiqeus et on les insert dans la pop qui est triée par fitness(croissant)
-def evolution(type, ini_P = None):
+def evolution(type, ini_P):
+    # initialisation
     print("\t", type, "evolution :")
     
     if type=='opti':
         global height_ref
         height_ref = fitness(ini_P[0], True)     # avant de réinsérer
 
+    P_set = set()
     P = []
-    if ini_P is None:
-        insert(P, init_pop(n), type)
-    else:
-        insert(P, ini_P, type) # we need to reinsert to evaluate the fit with thid type
+    insert(P, P_set, ini_P, type) # we need to reinsert to evaluate the fit with thid type
 
-    
+    # loop
     for g in range(1,gen+1):  
-        P_selc = rd.choices(P, k = min(n_selc,len(P)), weights = [len(P)-x for x in range(len(P))])
-        insert(P, mutation(P_selc), type)   # permet de trier les individues selon leur fit, dépend donc de type
+        P_selc = rd.choices(P, k = min(n_selc,len(P)), weights = [1/x for x in range(1,len(P)+1)])
+        insert(P, P_set, mutation(P_selc), type)   # permet de trier les individues selon leur fit, dépend donc de type
         P = P[: n + n_m + nb_crv]
         
         if g % 100 == 0:
@@ -530,14 +554,15 @@ def evolution(type, ini_P = None):
 # ---------------PARAMETRE--------------- #
 
 "Paramètres génétiques :"
-n = 300                 # nombre d'individus dans la population
-n_selc = int(n/3)       # nombre d'individus séléctionnés dans la population pour être muté, n_selc <= n
-n_m = 2                   # nombre d'individues créés par mutation génétique pour 1 individu
-max_mut = 5               # nombre maximal de mutations faites sur un individu
-nb_crv = int(n/3)       # nombre de crossover fait par gen
-gen = 500              # nombre de générations
+n = 200                 # nombre d'individus dans la population
+n_selc = int(n/2)       # nombre d'individus séléctionnés dans la population pour être muté, n_selc <= n
+n_m = 10                   # nombre d'individues créés par mutation génétique pour 1 individu
+max_mut = 7               # nombre maximal de mutations faites sur un individu
+nb_crv = int(n/5)       # nombre de crossover fait par gen
+gen = 1000              # nombre de générations
 
-c_G = 0.01              # bonus for G height
+c_height = 1
+c_B = 0.01              # bonus for G height
 c_nb_mvt = 1          # malus for size of Seq
 c_totF = 0.1              # malus pour la quantité de mouvements effectués
 
@@ -579,3 +604,5 @@ print(P[0].Seq)
 simulation(P[0].Seq)
 
 # --------------DATA---------------- #
+
+Seq_1 = {49: {'type': 'p', 'i_p': 3, 'F': [-0.5830063647708417, -0.09941911473989773, 0.8180256651073821]}, 47: {'type': 'body', 'F': [0.22562568916009695, 0.21105309108034653, 0.2749452300642492]}, 46: {'type': 'body', 'F': [-0.2787028711923609, -0.041726976467465704, 0.2165004752344064]}, 2: {'type': 'body', 'F': [-0.15480412637151364, -0.17862468143734134, 0.14860124032475097]}, 5: {'type': 'rot', 'i_bdy': 1, 'r': [1.2415086523966878, 0.31873400911899274]}, 13: {'type': 'to_hold', 'i_p': 0, 'i_h': 1, 'hold': [-0.7, 0.0, -0.7]}, 41: {'type': 'to_hold', 'i_p': 3, 'i_h': 8, 'hold': [0.0, -0.7, 1.4]}, 43: {'type': 'rot', 'i_bdy': 1, 'r': [0.18069579320898033, -0.5645309021661635]}, 40: {'type': 'to_hold', 'i_p': 2, 'i_h': 8, 'hold': [0.0, -0.7, 1.4]}, 31: {'type': 'rot', 'i_bdy': 0, 'r': [0.6233599289478704, -0.2957145115664872]}, 36: {'type': 'rot', 'i_bdy': 1, 'r': [-0.6775418846747346, -0.455876468489564]}, 29: {'type': 'rot', 'i_bdy': 0, 'r': [-0.1732059481385484, 1.312376056437464]}}
