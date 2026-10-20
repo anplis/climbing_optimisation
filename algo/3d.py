@@ -8,14 +8,24 @@ On modélisera le corps du grimpeur par un ensemble de 5 points et 4 liaisons :
  - 4 points pour les mains et les pieds
  - 4 liaisons pour lier ces mains et pieds avec le point centrale, chaque liaisons est équivalent cinématiquement à une liaison pivot et une liaison glissiére placés en séries sur le même axe centrale qui est le vecteur entre la/le main/pied et le point G
 
-Ainsi, un grimpeur pourra faire le mouvement (que l'on effectura seulement si ils sont possible pour le corps) :
- - Déplacer le point centrale du corps G 
- - Déplacer un pied ou une main 
+Ainsi, un grimpeur pourra faire les mouvement (que l'on effectura seulement si ils sont possible garder l'intégrité du corps et la réalité physique) :
+ - Translater ou rotationner le corps (J et B)
+ - Translater ou aller à une prise donnée pour un pied ou une main 
 
 Autres caractéristiques du modèle :
- - Le grimpeur doit toujours avoir au moins 2 points d'accroche au mur (ce qui est réaliste pour la plupart des mouvements en escalade)
  - On considère une grimpe dite statique, sans mouvement dynamique avec des mouvement instananés pour l'instant
- - les pieds sont toujours en dessous de J
+ - Lorsque on déplace le corps(J ou B) tout les points qui ne sont pas sur une prise suiveront ce mouvement 
+
+Un position valide signifie :
+ - respecter l'intégrité du corps : 
+    - longeur des membres, pieds en dessous de J
+    - les pieds en dessous du bassin(J) par rapport à la position(dépend de l'angle du corps)
+ - respecter la physique(du moins sa simulation) : 
+    - la force verticale(maximale théoriqement possible) résultante doit vaincre la gravité 
+    - l'angle de tenu de prise doit respecter le cône d'adhérence
+ - être dans une position raisonnable :
+    - un membre par prise au maximum (pas de ramener)
+    - 2 points d'accroche au mur au minimum
 """
 
 # ---------------IMPORT--------------- #
