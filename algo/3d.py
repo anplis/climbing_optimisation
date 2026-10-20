@@ -26,6 +26,7 @@ import math as ma
 import random as rd
 import copy as copy
 import multiprocessing as mltp
+import numpy as np
 
 
 # ---------------CLASS--------------- #
@@ -37,27 +38,25 @@ class InvalidMove(Exception):
 class point :
     def __init__(self, x, y, z, Interval_l : float, do_graph=False):
         self.hold = None
-        self.x = x
-        self.y = y
-        self.z = z
-        
+        self.XYZ = np.array([x,y,z])
         self.Interval_l = Interval_l
         
         if do_graph:
-            self.scatter, = ax.plot([self.x], [self.y], [self.z], 'o', color="black", markersize=6)
+            self.scatter, = ax.plot([self.XYZ[0]], [self.XYZ[1]], [self.XYZ[2]], 'o', color="black", markersize=6)
     
     def update_graph_p(self):
-        self.scatter.set_data_3d([self.x], [self.y], [self.z])
+        self.scatter.set_data_3d([self.XYZ[0]], [self.XYZ[1]], [self.XYZ[2]])
 
     def move(self, F):
-        self.x += F[0]
-        self.y += F[1]
-        self.z += F[2]
+        self.XYZ = np.add(self.XYZ, F)
+    
+    def go_to(self, M):
+        self.XYZ = M
           
 class climber :
     def __init__(self, XYZ_J, XYZ_B, do_graph = False):
-        self.J = XYZ_J
-        self.B = XYZ_B
+        self.J = np.array(XYZ_J)
+        self.B = np.array(XYZ_B)
 
         self.list_point = []
         
@@ -70,16 +69,13 @@ class climber :
 
         
     def add_point(self, x, y, z, Interval_l):
-        self.list_point.append(point(x,  y, z, Interval_l, self.do_graph))  
-        
+        p = point(x, y, z, Interval_l, self.do_graph)
+        self.list_point.append(p)
+
         if self.do_graph:
-            # create a graph line between G and the new point
-            i = len(self.list_point) - 1    # index of the point added
-            if i < 2:   # les jambes
-                self.list_point[i].line = ax.plot([self.J[0], self.list_point[i].x], [self.J[1], self.list_point[i].y], [self.J[2], self.list_point[i].z], color="blue", linewidth=2)[0]
-            else:   # les bras
-                self.list_point[i].line = ax.plot([self.B[0], self.list_point[i].x], [self.B[1], self.list_point[i].y], [self.B[2], self.list_point[i].z], color="blue", linewidth=2)[0]
-    
+            G = self.J if len(self.list_point) <= 2 else self.B   # jambes → J, bras → B
+            p.line = ax.plot(*zip(G, p.XYZ), color="blue", linewidth=2)[0]
+            
     def apply_move(self, move):
         type = move["type"]
         if type == 'rot':
@@ -95,9 +91,11 @@ class climber :
             raise InvalidMove
     
     def move_body(self, F):
-        for i in range(3):
-            self.J[i] += F[i]
-            self.B[i] += F[i]
+        self.J = np.add(self.J, F)
+        self.B = np.add(self.B, F)
+        for p in self.list_point:    # on déplace les points non acrochés aussi
+            if p.hold is None:
+                p.move(F)
 
     def move_p(self, i_p, F):
         self.list_point[i_p].move(F)    # met à jour coord du point
@@ -105,73 +103,80 @@ class climber :
          
     
     def move_to_hold(self, i_p, i_h, hold):
-        self.list_point[i_p].x = hold[0]  
-        self.list_point[i_p].y = hold[1]
-        self.list_point[i_p].z = hold[2]
+        self.list_point[i_p].go_to(hold)
         self.list_point[i_p].hold = i_h
     
     def move_rot(self, i_bdy, r):
         theta, phi = r
         moving, fixed = (self.J, self.B) if i_bdy == 0 else (self.B, self.J)
-        
-        v = [moving[k] - fixed[k] for k in range(3)]
-        v_rot = rotate_vector(v, theta, phi)
-        
-        new = [fixed[k] + v_rot[k] for k in range(3)]
-        
+
+        v = moving - fixed
+        new = fixed + np.array(rotate_vector(v, theta, phi))
+        shift = new - moving                       # déplacement du point qui tourne
+
         if i_bdy == 0:
             self.J = new
+            libres = self.list_point[:2]           # jambes, attachées à J
         else:
             self.B = new
-    
-    
+            libres = self.list_point[2:]           # bras, attachés à B
+
+        for p in libres:
+            if p.hold is None:
+                p.move(shift)
+        
     def is_valid(self): # renvoie si la position actuel de C est valide sans la modifier
-        l_bdy = ma.hypot(*(self.B[j] - self.J[j] for j in range(3)))
+        global Fz, min_h, cone, angle, J_up_B, not_l_dos, not_l_p, same_h
+        
+        JB = np.subtract(self.B, self.J)
+        l_bdy = d(self.B, self.J)
         
         hold_held = [p.hold for p in self.list_point if p.hold is not None]
-        #if len(set(hold_held)) != len(hold_held):          # deux points sur la même prise
-        #    return False
+        if len(set(hold_held)) != len(hold_held):          # deux points sur la même prise
+            same_h += 1
+            return False
         
         for i_p,p in enumerate(self.list_point):
             G = self.J if i_p < 2 else self.B
-            x,y,z = (p.x - G[0], p.y - G[1], p.z - G[2])
-            
-            l_p = ma.hypot(x, y, z)
+            Gp = np.subtract(p.XYZ,G)
+            l_p = d(G, p.XYZ)
             
             if not (p.Interval_l[0] <= l_p <= p.Interval_l[1]): # si la taille du bras est raisonnable
+                not_l_p += 1
                 return False
             if abs(l_bdy - l_dos)>1e-4:    # la longeur du dos doit rester la même
+                not_l_dos += 1
                 return False
             if self.B[2] < self.J[2]:   # le bassin doit être plus bas que les épaules
+                J_up_B += 1
                 return False
             if i_p < 2:    # angle cohérent des jambes(inférieure au plan normal du dos en J)
-                x_b,y_b,z_b = (self.B[i] - self.J[i] for i in range(3))
-                denom = ((ma.sqrt(x**2 + y**2 + z**2))*(ma.sqrt(x_b**2 + y_b**2 + z_b**2)))
-                nom = (x*x_b + y*y_b + z*z_b)
+                denom = l_p*l_bdy
+                nom = np.dot(Gp, JB)
                 if denom>1e-5 and -1<= nom/denom <= 1:
                     theta = ma.acos(nom/denom)  # l'angle formé par la jambe par rapport au bassin(point J)
                 else:
                     theta = 0
                 if not angle_in(theta, [ma.pi/2,3*ma.pi/2]):    
+                    angle += 1
                     return False
             if i_p >= 2 and p.hold is not None and l_p > 1e-5:# pour les mains, l'angle formé par le bras doit être dans le cône d'adhérence de la prise qu'il tient
-                xh,yh,zh = vect_h[p.hold]
-                c = (x*xh + y*yh + z*zh)/l_p
+                c = np.dot(vect_h[p.hold],Gp)/l_p
                 if ma.acos(max(-1.0, min(1.0, c))) > coef_h[p.hold]:   # hors du cône
+                    cone += 1
                     return False
                 
         if not self.has_min_hold():    # si moins de deux membres accrochés dont au moins une main
+            min_h += 1
             return False
         if not self.Fz_max()>=0:  # si la résultante, selon z est dirigée vers le bas ou selon y est dirigée dans sens opposé au mur 
-                    return False
+            Fz += 1
+            return False
         return True
     
     def Fz_max(self):    # fait bilan des forces, pour des forces maximales appliquées sur les prises
-        Fz_max = -masse*9.81 # poids
-        for p in self.list_point:
-            if p.hold is not None:
-                Fz_max += vect_Fmax_h[p.hold][2]
-        return Fz_max
+        P = - masse*9.81 # poids
+        return sum(vect_Fmax_h[p.hold][2] for p in self.list_point if p.hold is not None) + P
     
     def has_min_hold(self):
         if sum(1 if p.hold is not None else 0 for p in self.list_point[2:]) == 0:    # si aucune main est accrochée
@@ -192,7 +197,7 @@ class climber :
             
             parent = self.J if i<2 else self.B
             p = self.list_point[i]
-            p.line.set_data_3d([parent[0], p.x],[parent[1], p.y], [parent[2], p.z])
+            p.line.set_data_3d([parent[0], p.XYZ[0]],[parent[1], p.XYZ[1]], [parent[2], p.XYZ[2]])
         
         fig.canvas.draw()
         fig.canvas.flush_events()
@@ -216,16 +221,25 @@ class Seq:
                 if not free_T:  # si tout les instants sont occupés
                     return
                 T_new = rd.choice(free_T)
+            
             C = init_climber()
             try :
                 self.simu_to_T(C,T_new-1)   # on se place à l'intant d'avant l'ajout du mouvement
             except InvalidMove:
                 return
             
-            rd_mut_func = rd.choice([self.rot, self.to_hold, self.p, self.body])
-            Dict = rd_mut_func(C)
-            if Dict is not None:
-                self.add_F(T_new, Dict)
+            rd_mut = rd.choice([self.rot, self.to_hold, self.p, self.body])
+            for _ in range(10): # 10 essaies pour faire une mutation valide
+                Cc = copy.deepcopy(C)
+                rd_mvt = rd_mut(Cc)
+                if rd_mvt is not None:
+                    try:
+                        Cc.apply_move(rd_mvt)
+                    except InvalidMove:
+                        continue
+                    self.add_F(T_new, rd_mvt)
+                    break
+
         else:   # dans 30% des cas on en enléve un
             self.del_rd()
         
@@ -234,16 +248,13 @@ class Seq:
         for T in sorted(self.Seq.keys()):
             if T > T_new:
                 break
-        
             C.apply_move(self.Seq[T])
     
     def rot(self, C):
         i_bdy = rd.choice([0,1])
         r = [rd.uniform(-max_theta,max_theta), rd.uniform(-max_phi,max_phi)]
-        C.move_rot(i_bdy,r)
-        if C.is_valid():
-            return {"type":"rot", "i_bdy" : i_bdy, "r" : r}
-        
+        return {"type":"rot", "i_bdy" : i_bdy, "r" : r}
+
     def to_hold(self, C):
         i_p = rd.randrange(len(C.list_point))
         h_possible = []
@@ -260,15 +271,11 @@ class Seq:
     def p(self, C):
         i_p = rd.randrange(len(C.list_point))
         F = [rd.uniform(-max_F, max_F) for _ in range(3)]
-        C.move_p(i_p,F)
-        if C.is_valid():
-            return {"type" : "p", "i_p" : i_p, "F" : F}
-    
+        return {"type" : "p", "i_p" : i_p, "F" : F}
+
     def body(self,C):
         F = [rd.uniform(-max_F, max_F) for _ in range(3)]
-        C.move_body(F)
-        if C.is_valid():
-            return {"type" : "body", "F" : F}
+        return {"type" : "body", "F" : F}
     
     def del_rd(self):    # supprime un mouvement au hasard
         if self.Seq:
@@ -277,10 +284,13 @@ class Seq:
     
 # ---------------GRAPH--------------- #
 
+def create_fig():
+    global fig, ax
+    fig = plt.figure()
+    ax = fig.add_subplot(projection='3d')
+
 # Création de la figure :
-fig = plt.figure()
-ax = fig.add_subplot(projection='3d')
-def set_fig():
+def set_fig():    
     ax.set_title("Simulation d'escalade")
     marge = 1
     for lim,i in zip([ax.set_xlim,ax.set_ylim,ax.set_zlim],[0,1,2]):
@@ -304,6 +314,7 @@ def show_holds():
     ax.quiver(x,y,z,u,v,w)
 
 def simulation(Seq, n_loop = -1):
+    create_fig()
     while plt.fignum_exists(fig.number) and (n_loop < 0 or n_loop > 0):
         ax.clear()
         set_fig()
@@ -326,14 +337,9 @@ def simulation(Seq, n_loop = -1):
 
 # ---------------FONCTIONS--------------- #
 
-def distance(XYZ, ABC):
-    x = XYZ[0] - ABC[0]
-    y = XYZ[1] - ABC[1]
-    z = XYZ[2] - ABC[2]
-    return ma.sqrt(x**2 + y**2 + z**2)
-
-def distance_in(XYZ, ABC, Interval):
-    return Interval[0] <= distance(XYZ, ABC) <= Interval[1]
+def d(A, B):
+    AB = np.subtract(B,A)
+    return ma.hypot(*AB)
 
 def angle_in(teta, Interval):   # si teta est dans a,b modulo 2pi
     a,b = Interval
@@ -354,8 +360,8 @@ def rotate_vector(v, theta, phi):
     return [cp * x1 + sp * z1, y1,-sp * x1 + cp * z1]
 
 def middle_seg(A,B):
-    AB = [B[i]-A[i] for i in range(len(A))]
-    return [A[i] + AB[i]/2 for i in range(len(A))]
+    AB = np.subtract(B,A)
+    return np.add(A,AB/2)
 
 def atan_c(x):
     return ma.atan(x)*2/ma.pi
@@ -412,17 +418,21 @@ def mutation(selected : list) -> list :     # créé m variantes de chaque indiv
     Inds = []
     for ind in selected:
         for _ in range(n_m):
-            new_ind = copy.deepcopy(ind)
             
-            for _ in range(rd.randint(1, max_mut)):
-                new_ind.rd_mut()
-                if new_ind is None:
-                    break
+            for _ in range(10): # 10 essaies
+                new_ind = copy.deepcopy(ind)
                 
-            if new_ind.Seq == ind.Seq or new_ind is None:
-                continue
-
-            Inds.append(new_ind)
+                for _ in range(rd.randint(1, max_mut)):
+                    new_ind.rd_mut()
+                    if new_ind is None:
+                        break
+                    
+                if new_ind.Seq == ind.Seq or new_ind is None:
+                    continue
+                else:
+                    Inds.append(new_ind)
+                    break
+            
             
     for _ in range(nb_crv):
         len_ini = len(Inds)
@@ -476,11 +486,11 @@ def fitness(ind : Seq, only_height = False) -> float:   # calcul du fitness d'un
     except InvalidMove:
         return float('inf')
     
-    max_height_z = max(p.z for p in C.list_point if p.hold)
+    max_height_z = max(p.XYZ[2] for p in C.list_point if p.hold is not None)
     h_still = (Holds[-1][2] - max_height_z)**2
     if only_height:
         return h_still
-    B_stil = distance(C.B, Holds[-1])
+    B_stil = d(C.B, Holds[-1])
     
     if h_still<=1e-5:    # si touche la dernière prise
         B_stil = 0
@@ -506,12 +516,13 @@ def fitness_opti(ind, high_ref): # évalue si l'individu à réussi à optimiser
                         tot_F += move_cost(ind.Seq[T])
                     else : # move "to_hold"
                         p = C.list_point[ind.Seq[T]["i_p"]]
-                        tot_F += (p.x-ind.Seq[T]["hold"][0])**2 + (p.y-ind.Seq[T]["hold"][1])**2 + (p.z-ind.Seq[T]["hold"][2])**2
+                        h = ind.Seq[T]["hold"]
+                        tot_F += d(p.XYZ, h)
                     C.apply_move(ind.Seq[T])
     except InvalidMove:
         return float('inf')  # +inf
     
-    max_height_z = max(p.z for p in C.list_point if p.hold)
+    max_height_z = max(p.XYZ[2] for p in C.list_point if p.hold is not None)
     h_still = (Holds[-1][2] - max_height_z)**2
     
     nb_mvt = len(list(ind.Seq.keys())) if ind.Seq.keys() else 0
@@ -538,7 +549,7 @@ def evolution(type, ini_P):
         insert(P, P_set, mutation(P_selc), type, height_ref)   # permet de trier les individues selon leur fit, dépend donc de type
         P = P[: n + n_m + nb_crv]
         
-        if g % 100 == 0:
+        if g % int(n/3) == 0:
             print("\t\t",g,'ième génération : best fitness ',type,' : ',P[0].fit)
             #print(P[0].Seq)
 
@@ -550,10 +561,10 @@ def evolution(type, ini_P):
 
 "Paramètres génétiques :"
 n = 200                 # nombre d'individus dans la population
-n_selc = int(n/4)       # nombre d'individus séléctionnés dans la population pour être muté, n_selc <= n
-n_m = 5                   # nombre d'individues créés par mutation génétique pour 1 individu
+n_selc = int(n/6)       # nombre d'individus séléctionnés dans la population pour être muté, n_selc <= n
+n_m = 3                   # nombre d'individues créés par mutation génétique pour 1 individu
 max_mut = 5               # nombre maximal de mutations faites sur un individu
-nb_crv = int(n/5)       # nombre de crossover fait par gen
+nb_crv = int(n/6)       # nombre de crossover fait par gen
 gen = 500              # nombre de générations
 
 c_height = 1
@@ -566,15 +577,15 @@ masse = 60          # masse(kg)
 l_b = 1             # longueur bras
 l_j = 1.5           # longueur jambe
 l_dos = 0.7         # longeur du dos
-max_F = 2.5         # norme maximal d'un mouvement
-max_theta = ma.pi/2 # angle maximal d'un movement de rotation polaire
+max_F = 1         # norme maximal d'un mouvement
+max_theta = ma.pi # angle maximal d'un movement de rotation polaire
 max_phi = ma.pi     # angle maximal d'un movement de rotation azimut
 
 "Paramètre de la voie"
 Holds = [[0.7, 0.0, -0.7], [-0.7, 0.0, -0.7], [0.0, 0.0, 0.5599999999999999], [-0.7, 0.0, 0.35], [1.75, -0.7, 1.9249999999999998], [2.0999999999999996, -0.7, 3.5], [1.4, -0.7, 3.5], [0.0, -0.7, 2.8], [0.0, -0.7, 1.4], [1.0499999999999998, -0.7, 0.7], [0.7, -0.7, 2.0999999999999996], [1.0499999999999998, -1.0499999999999998, 4.8999999999999995], [2.0999999999999996, -1.0499999999999998, 4.8999999999999995], [1.4, -1.75, 6.3]]
-coef_h = [ma.pi/2]*len(Holds)   # coefficient d'adhérence
+coef_h = [3*ma.pi/4]*len(Holds)   # coefficient d'adhérence
 
-Fmax_h = [500]*len(Holds)   # force maximal(N) que l'on peut appliquer sur une prise
+Fmax_h = [400]*len(Holds)   # force maximal(N) que l'on peut appliquer sur une prise
 
 # direction dans laquelle chaque prise peut tirer la main (à adapter prise par prise)
 dir_h  = [(0, 0.5, 1)] * len(Holds)
@@ -604,28 +615,43 @@ import os
 cpu = os.cpu_count() - 1
 
 def module(P):
+    global Fz, min_h, cone ,angle ,J_up_B ,not_l_dos ,not_l_p ,same_h
+    Fz = min_h = cone = angle = J_up_B = not_l_dos = not_l_p = same_h = 0
     P = evolution("height", P)
     P = evolution("opti", P)
     P.sort(key=lambda ind: fitness(ind))    # tri par "vrai" fitness (pas celui de opti)
-    return P
+    counters = [Fz, min_h, cone ,angle ,J_up_B ,not_l_dos ,not_l_p ,same_h]
+    return P,counters
+
 
 spread = 10 # nb of ind spreading to neighbour islands
 def main_mltp():
     P = init_pop(100)
-    Ps = [copy.deepcopy(P) for _ in range(5)]
+    tot = [0]*8
+    Ps = [copy.deepcopy(P) for _ in range(10)]
     for i in range(5):
         print("MODULE :",i)
-        with mltp.Pool() as pool:
-            Ps = pool.map(module, Ps)
-            
-        for i in range(len(Ps)):
-            if i == len(Ps):
-                i = 0
-            Ps[i] = Ps[i][:n-2*spread]
-            Ps[i] += Ps[i-1][:spread] + Ps[i+1:spread]
 
-    print(P[0].Seq)
-    simulation(P[0].Seq)
+        for i in range(0,len(Ps)-1):
+            Ps[i] = Ps[i][:n-2*spread]
+            Ps[i] += Ps[i-1][:spread] + Ps[i+1][:spread]
+        Ps[-1] = Ps[-1][:n-2*spread]
+        Ps[-1] += Ps[-2][:spread] + Ps[0][:spread]
+        
+        with mltp.Pool() as pool:
+            results = pool.map(module, Ps)
+        Ps = []
+        for P_i, counters in results:
+            Ps.append(P_i)
+            for k in range(8):
+                tot[k] += counters[k]
+    best = max(sum(Ps, []), key=lambda ind: fitness(ind, True))
+    print(best.Seq)
+    print('fitness :',fitness(best),'height still :',fitness(best,True))
+    print(tot)
+    simulation(best.Seq)
+
+Fz, min_h, cone ,angle ,J_up_B ,not_l_dos ,not_l_p ,same_h = [0]*8
 
 if __name__ == '__main__':
     main_mltp()
