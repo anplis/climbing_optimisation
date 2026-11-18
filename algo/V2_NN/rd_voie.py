@@ -5,7 +5,7 @@ from climber import bdy_param,link_len,climber,InvalidPosition
 """générer des voies aléatoires"""
 
 wall = (2.5, 5)   # 2,5 m largeur / 5 m hauteur
-F_HOLD_MAX = 1000    # N
+F_HOLD_MAX = {"pied" : 5_000, "main" : 1000}    # (N), force max verticale sur prise de pied, de bras 
 
 def holds_generator_rd(alpha): # densitée = nb prise/surface ou volumme de size, alpha = indice de difficulté in ]0,1[ : 1 dur, 0 facile
     l_dos, l_j_0, l_j_1, l_b_1, l_b_0 = [bdy_param["links"][((0,0),(0,1))]] + list(link_len(1)) + list(link_len(3))
@@ -30,18 +30,20 @@ def holds_generator_rd(alpha): # densitée = nb prise/surface ou volumme de size
     Holds = [[G[0] + np.cos(theta)*l, G[1] + np.sin(theta)*l] for l,theta,G in zip(ls,thetas,origin)]
     
     for _ in range(max(0,n-4)):
-        for _ in range(5):
+        for _ in range(10): #10 essais
             new = [rd.uniform(0,s) for s in wall]
-            if all(np.linalg.norm(np.subtract(new,h))>0.15 for h in Holds):
+            if all(np.linalg.norm(np.subtract(new,h))>0.15 for h in Holds): #si la prise n'est pas sur un emplacement déjà pris
                 Holds.append(new)
                 break
 
-    f0, direc, Fv_max = [], [], []
+    f0, direc, Fv_max, type = [], [], [], ["pied","pied","main","main"]
     for _ in Holds:
         f0.append(min(np.pi, max(0.1, rd.gauss((np.pi/2)*(1-alpha), 0.5))))
         theta = np.pi/2 + rd.gauss(0, alpha)*np.pi/2      # axe vers le haut
         direc.append([np.cos(theta), np.sin(theta)])
-        Fv_max.append(max(200, F_HOLD_MAX*(1 - min(1, abs(rd.gauss(0, alpha))))))
+        typ = rd.choice(["main", "pied"])
+        type.append(typ)
+        Fv_max.append(max(200, F_HOLD_MAX[typ]*(1 - min(1, abs(rd.gauss(0, alpha))))))
     
     # permutation pour que la prise la plus haute soit en dernier
     top = max(Holds, key=lambda h: h[1])
@@ -50,22 +52,23 @@ def holds_generator_rd(alpha): # densitée = nb prise/surface ou volumme de size
     Fv_max[i],Fv_max[-1] = Fv_max[-1],Fv_max[i]
     f0[i],f0[-1] = f0[-1],f0[i]
     direc[i],direc[-1] = direc[-1],direc[i]
+    type[i],type[-1] = type[-1],type[i]
     
-    return Holds, Fv_max, f0, direc, bassin, q_trc
+    return Holds, Fv_max, f0, direc, bassin, q_trc, type
 
 def holds_generator(alpha=None, stats=None):
     for i in range(100):
         a = rd.random() if alpha is None else alpha
-        Holds, Fv_max, f0, direc, bassin, q_trc = holds_generator_rd(a)
+        Holds, Fv_max, f0, direc, bassin, q_trc, type = holds_generator_rd(a)
         try:
-            C = climber(bdy_param, Holds, f0, direc, Fv_max)
+            C = climber(bdy_param, Holds, f0, direc, Fv_max, type)
             C.init(bassin, q_trc)
             C.compute_couple()
         except InvalidPosition:
             continue
         if stats is not None:
             stats.append(i)
-        return Holds, Fv_max, f0, direc, bassin, q_trc
+        return Holds, Fv_max, f0, direc, bassin, q_trc, type
     raise RuntimeError("Impossible de générer une voie valide après 100 essais")
 
 def test(alpha=None):
