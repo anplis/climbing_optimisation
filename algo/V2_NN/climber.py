@@ -53,10 +53,9 @@ ORIGIN = {1: (0,0), 2: (0,0), 3: (0,1), 4: (0,1)}
 eps = 1e-4      # tolérance de déformation du corps (longueur des liens)
 r_hold = 0.1    # m, distance pour rester accroché à une prise
  
-v_max = 15      # m/s  (tronc)
-w_max = 3       # rad/s (tronc et articulations)
-C_max = masse*9.81
-F_max = 300     # N, force max de translation du tronc
+v_max = 5       # m/s  (tronc)
+w_max = 15      # rad/s (tronc et articulations)
+
 F_HOLD_MAX = 1000   # N, force verticale max qu'une prise peut encaisser (générateur)
  
 Kp = 100
@@ -101,8 +100,12 @@ class line_viz:
 FORM = {(1,1):"o",(2,1):"o",(3,1):".",(4,1):"."}
  
 class climber:
-    def __init__(self, bdy_param, Holds, f0, direc, Fv_max, do_graph=False):
+    def __init__(self, bdy_param, Holds, f0, direc, Fv_max, type, do_graph=False):
         self.Holds = Holds
+        self.Holds_dict = {"main" : [], "pied" : []}
+        for h,typ in zip(Holds,type):
+            self.Holds_dict[typ].append(h)
+        
         self.f0 = f0
         self.direc = direc
         self.Fv_max = Fv_max
@@ -200,9 +203,11 @@ class climber:
             return min((P1, P2), key=lambda p: p[1])    # coude vers la bas
  
     def nearest_hold(self, i):
-        p1 = self.points[(i,1)].coord
-        return min(([k for k in range(len(self.Holds)) if k not in self.holds_held]),
-                        key=lambda k: d(p1, self.Holds[k]))
+        "prise la plus proche avec un type correspondant au membre(pied ou min)"
+        p1 = self.points[(i,1)]
+        type = p1.type
+        return min(([k for k in range(len(self.Holds_dict[type])) if k not in self.holds_held]),
+                        key=lambda k: d(p1.coord, self.Holds[k]))
  
     def dist_nearest_k_hold(self, i, k):
         p1 = self.points[(i,1)].coord
@@ -273,7 +278,7 @@ class climber:
         # déplace le tronc
             # rotation autour du milieu
         if abs(wrap(q_bdy - self.q_trc)) > min_q:
-            C = PD(self.q_trc, self.trc_w, q_bdy, C_max, ang=True)
+            C = PD(self.q_trc, self.trc_w, q_bdy, ang=True)
             self.rot_bdy(C)
         else:
             self.trc_w = 0.0
@@ -282,7 +287,7 @@ class climber:
         mid = (B.coord + E.coord)/2
         cible = np.array([x_bdy, y_bdy])
         if d(mid, cible) > min_trs:
-            F = PD(mid, self.trc_v, cible, F_max)
+            F = PD(mid, self.trc_v, cible)
             self.trs_bdy(F)
         else:
             self.trc_v = np.zeros(2)
@@ -342,7 +347,7 @@ class climber:
         h = (E - B)/2       # demi-vecteur milieu -> épaule
         m = self.m_tronc            # masse totale du tronc répartie sur les 2 points
         J = m * d(B, E)**2 / 4      # inertie : 2 masses ponctuelles à L/2 du milieu
-        self.trc_w = float(np.clip(self.trc_w + C/J*dt, -w_max, w_max)) # limite la vitesse
+        self.trc_w = float(np.clip(self.trc_w + C/J*dt, -w_max, w_max)) # limite la vitesse de rotation à w_max
         h = rot(h, self.trc_w*dt)
         self.points[(0,0)].coord = c - h
         self.points[(0,1)].coord = c + h
@@ -359,7 +364,7 @@ class climber:
         self.trc_v = self.trc_v + a*dt
  
         norm = np.linalg.norm(self.trc_v)
-        if norm > v_max:            # limite la vitesse
+        if norm > v_max:            # limite la vitesse à v_max
             self.trc_v = self.trc_v * v_max/norm
  
         self.points[(0,0)].coord = B + self.trc_v*dt
@@ -423,14 +428,14 @@ def wrap(a):
 #-----------------------------------------CALCUL-----------------------------------------#
  
  
-def PD(q0, w0, q_trgt, Cmax, ang=False):
+def PD(q0, w0, q_trgt, ang=False):
     """Si ang=True : l'erreur d'angle est ramenée dans [-pi, pi), le couple/la force est limité à Cmax (en norme)"""
     e = np.asarray(q_trgt - q0, float)
     if ang:
         e = wrap(e)
     C = Kp*e - Kd*np.asarray(w0, float)
     norm = np.linalg.norm(C)
-    return C if norm <= Cmax else C*Cmax/norm
+    return C 
  
  
 def couple_static(pts, masses, cms, F_ctc=np.zeros(2)):
@@ -565,15 +570,17 @@ def set_fig(Holds):
     ax.set_aspect('equal')
     ax.grid(False)
  
-def show_holds(Holds):
-    ax.scatter(*zip(*Holds), c='black', marker='v', s=30)
+def show_holds(Holds, type):
+    color = {"main" : "gray", "pied" : "black"}
+    for h,t in zip(Holds,type):
+        ax.scatter(*h, c = color[t], marker='v', s = 30)
  
 def simulation(Seq, voie, no_physic = False, n_loop=-1):
-    """voie = (Holds, Fv_max, f0, direc, bassin, q_trc)"""
-    Holds = voie[0]
+    """voie = (Holds, Fv_max, f0, direc, bassin, q_trc, type)"""
+    Holds, type = voie[0], voie[6]
     create_fig()
     set_fig(Holds)
-    show_holds(Holds)
+    show_holds(Holds, type)
     plt.ion()
     plt.show()
  
@@ -593,8 +600,8 @@ def simulation(Seq, voie, no_physic = False, n_loop=-1):
  
 def init_climber(voie, do_graph=False):
     """voie = (Holds, Fv_max, f0, direc, bassin, q_trc)"""
-    Holds, Fv_max, f0, direc, bassin, q_trc = voie
-    C = climber(bdy_param, Holds, f0, direc, Fv_max, do_graph)
+    Holds, Fv_max, f0, direc, bassin, q_trc, type = voie
+    C = climber(bdy_param, Holds, f0, direc, Fv_max, type, do_graph)
     # départ : pieds sur les prises 0 et 1, mains sur les prises 2 et 3
     C.init(bassin, q_trc)
     return C
