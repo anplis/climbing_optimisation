@@ -1,5 +1,5 @@
 #-----------------------------------------IMPORT-----------------------------------------#
-import os
+import os   #16 cpu
 from collections import defaultdict
 
 import numpy as np
@@ -24,7 +24,6 @@ from tqdm import tqdm
 from climber import init_climber, InvalidPosition, T_tot, f, d
 from rd_voie import holds_generator
 
-
 #-----------------------------------------PARAM-----------------------------------------#
 num_workers = 15
 max_diff = 0.5
@@ -34,7 +33,7 @@ lr = 3e-4
 max_grad_norm = 1.0
 
 frames_per_batch = 4500 # multiple de nuw_workers
-total_frames = 450_000
+total_frames = 900_000
 
 sub_batch_size = 100 # frames_per_batch doit être un multiple de sub_batch_size
 num_epochs = 10
@@ -43,7 +42,7 @@ gamma = 0.99
 lmbda = 0.95
 entropy_eps = 1e-4
 
-n_hold_visible = 5
+n_hold_visible = 5  #nombre de prises visible par membre(distance des n plus proches)
 OBS_DIM = 42 + 4 * n_hold_visible
 ACTION_DIM = 15
 
@@ -54,7 +53,6 @@ class ClimbEnv(EnvBase):
         super().__init__(device="cpu", batch_size=[])
         self.diff = diff
         self.C = None
-        self.holds = None
 
         # actions = [q_trc, x, y, 8 angles, 4 grips]
         low = [-np.pi, -5, -5] + [-np.pi] * 8 + [0] * 4
@@ -71,7 +69,7 @@ class ClimbEnv(EnvBase):
     def _obs(self):
         C = self.C
         G = C.centre_masse()
-        goal = d(C.points[(0, 0)].coord, self.holds[-1])
+        goal = d(C.points[(0, 0)].coord, C.Holds[-1])
         q = [C.q_limb[i] for i in range(1, 5)]
         coord = [C.points[k].coord for k in sorted(C.points)]
         held = [float(C.points[(i, 1)].hold is not None) for i in range(1, 5)]
@@ -83,10 +81,11 @@ class ClimbEnv(EnvBase):
         return torch.tensor(obs, dtype=torch.float32)
 
     def _reset(self, td = None):
-        self.holds = holds_generator(self.diff)
-        self.C = init_climber(self.holds, do_graph=False)
+        voie = holds_generator(self.diff)
+        self.C = init_climber(voie, do_graph=False)
         self.prev_y = self.C.centre_masse()[1]
-        self.prev_y_p = max(p.coord[1] for p in self.C.points.values())
+        self.prev_y_pmax = max(p.coord[1] for p in self.C.points.values())
+        self.prev_y_pmin = min(p.coord[1] for p in self.C.points.values())
         return TensorDict({"observation": self._obs(),
                            "done": torch.zeros(1, dtype=torch.bool),
                            "terminated": torch.zeros(1, dtype=torch.bool),
@@ -100,10 +99,12 @@ class ClimbEnv(EnvBase):
             Couples = self.C.mvt(output)
             couple = np.abs(Couples).sum()
             y = self.C.centre_masse()[1]
-            y_p = max(p.coord[1] for p in self.C.points.values())
-            reward = 10.0 * (y - self.prev_y) + 10 * (y_p - self.prev_y_p) + 0.1 / (1 + couple)
+            y_pmax = max(p.coord[1] for p in self.C.points.values())
+            y_pmin = min(p.coord[1] for p in self.C.points.values())
+            reward = 10.0 * (y - self.prev_y) + 10 * (y_pmax - self.prev_y_pmax) + 10 * (y_pmin - self.prev_y_pmin) + 0.1 / (1 + couple)
             self.prev_y = y
-            self.prev_y_p = y_p
+            self.prev_y_pmax = y_pmax
+            self.prev_y_pmin = y_pmin
             if self.C.win():
                 reward += 100.0
                 terminated = True
