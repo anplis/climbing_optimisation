@@ -50,17 +50,22 @@ def skip_fig(event):
     skip["value"] = True
 
 def run(diff):
-    actions = []
+    outputs = []
 
     voie = holds_generator(diff)
     Holds = voie[0]
+    type = voie[6]
 
     create_fig()
     set_fig(Holds)
-    show_holds(Holds)
+    show_holds(Holds, type)
     axes = plt.axes([0.8, 0.01, 0.1, 0.05])
     button_skip = Button(axes,label = 'skip', color = 'gray')
     button_skip.on_clicked(skip_fig)
+    
+    # axe = 
+    # button_stop = Button(axe,label = 'stop', color = 'red')
+    # button_stop.on_clicked(lambda event: exit())
     C = init_climber(voie, do_graph=True)
     env = ClimbEnv(diff)
     env.holds, env.C = voie, C
@@ -72,11 +77,10 @@ def run(diff):
                 break
             obs = (env._obs() - loc) / scale
             td = policy(TensorDict({"observation": obs}, []))
-            action = td["action"].numpy().astype(float)
-            action = td["action"]
-            actions.append(action)
+            output = td["action"].numpy().astype(float)
+            outputs.append(output)
             try:
-                C.mvt(action)
+                C.mvt(output)
             except InvalidPosition:
                 print(f"chute au pas {t}")
                 break
@@ -92,15 +96,15 @@ def run(diff):
         plt.pause(3)
     plt.clf()
     skip["value"] = False
-    return actions
+    return outputs
 
 def test(diff=0.5, n=None):
     for _ in range(n if n is not None else 10000):
-        actions = run(diff)
+        outputs = run(diff)
 
-        actions = np.array(actions)
-        for i in range(actions.shape[1]):
-            plt.plot(actions[:,i],label = i+1)
+        outputs = np.array(outputs)
+        for i in range(outputs.shape[1]):
+            plt.plot(outputs[:,i],label = i+1)
             
         plt.legend()
         axes = plt.axes([0.8, 0.01, 0.1, 0.05])
@@ -137,4 +141,5 @@ def train_stats():
 
 # --- MAIN ---
 
-test(0.2,10)
+#train_stats()
+test(0.1,10)
