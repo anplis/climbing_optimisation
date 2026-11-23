@@ -208,7 +208,8 @@ class climber:
         p1 = self.points[(i,1)]
         type = p1.type
         p_to_holds = [vect(p1.coord,self.Holds[i_h]) for i_h in self.Holds_dict[type]]
-        return sorted(p_to_holds, key = lambda v: np.linalg.norm(v))[:k]
+        nearest = sorted(p_to_holds, key = lambda v: np.linalg.norm(v))[:k]
+        return nearest + [np.zeros(len(p1.coord))] * (k - len(nearest))   #toujours de la même taille k même si on trouve pas de prises
     
     def nearest_hold_ix(self, i):
         "l'indice de la prise tenable la plus proche du membre i "
