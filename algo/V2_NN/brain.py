@@ -26,7 +26,7 @@ from rd_voie import holds_generator
 
 #-----------------------------------------PARAM-----------------------------------------#
 num_workers = 15
-max_diff = 0.5
+max_diff = 0.7
 
 num_cells = 256
 lr = 3e-4
@@ -122,9 +122,9 @@ class ClimbEnv(EnvBase):
                         p.prev_hold = p.hold
             reward = rewards_w([[10, higher_holds], [10, y_G-self.prev_y_G], [10, y_pmax-self.prev_y_pmax], [10,y_pmin-self.prev_y_pmin], [-1e-4, couple]])
             
-            self.prev_y_G       = max(y_G, self.prev_y_G) 
-            self.prev_y_pmax    = max(y_pmax, self.prev_y_pmax) # pour éviter des oscillations
-            self.prev_y_pmin    = max(y_pmin, self.prev_y_pmin)
+            self.prev_y_G       = y_G
+            self.prev_y_pmax    = y_pmax
+            self.prev_y_pmin    = y_pmin
             
             if self.C.win():
                 reward += 10_000
@@ -166,6 +166,10 @@ def compute_obs_stats(n_steps=400):
     for diff in np.linspace(0, max_diff, num_workers):
         e = ClimbEnv(diff)
         r = e.rollout(n_steps, break_when_any_done=False)
+        for i, ep in enumerate(r):   # ou r.unbind(0)
+            s = tuple(ep["observation"].shape)
+            if s != (102,):
+                print("entrée", i, "shape", s)
         obs.append(r["observation"])
     obs = torch.cat(obs, 0)
     loc = obs.mean(0)
