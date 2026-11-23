@@ -32,8 +32,8 @@ num_cells = 256
 lr = 3e-4
 max_grad_norm = 1.0
 
-frames_per_batch = 4500 # multiple de nuw_workers
-total_frames = 900_000
+frames_per_batch = 4_500 # multiple de nuw_workers
+total_frames = 450_000
 
 sub_batch_size = 100 # frames_per_batch doit être un multiple de sub_batch_size
 num_epochs = 10
@@ -43,11 +43,14 @@ lmbda = 0.95
 entropy_eps = 1e-4
 
 n_hold_visible = 5  #nombre de prises visible par membre(distance des n plus proches)
-OBS_DIM = 42 + 4 * n_hold_visible
+OBS_DIM = 62 + 4 * 2 * n_hold_visible
 ACTION_DIM = 15
 
 
 #-----------------------------------------ENVIRONNEMENT-----------------------------------------#
+def rewards_w(L : list) -> float:
+    return sum(w * max(0,x) for w, x in L)
+
 class ClimbEnv(EnvBase):
     def __init__(self, diff):
         super().__init__(device="cpu", batch_size=[])
@@ -67,25 +70,33 @@ class ClimbEnv(EnvBase):
         self.reward_spec = Unbounded(shape=(1,), dtype=torch.float32)
 
     def _obs(self):
-        C = self.C
+        C = self.C 
         G = C.centre_masse()
-        goal = d(C.points[(0, 0)].coord, C.Holds[-1])
-        q = [C.q_limb[i] for i in range(1, 5)]
-        coord = [C.points[k].coord for k in sorted(C.points)]
-        held = [float(C.points[(i, 1)].hold is not None) for i in range(1, 5)]
-        can_hold = [float(C.can_hold(i)) for i in range(1, 5)]
-        dist_holds = [C.dist_nearest_k_hold(i, n_hold_visible) for i in range(1, 5)]
+        goal = d(C.points[(0, 0)].coord, C.Holds[-1])   # distance entre le bassin et la prise la plus haute
+        q = [C.q_limb[i] for i in range(1, 5)]  # angles des membres
+        coords = [C.points[k].coord for k in sorted(C.points)]  # coordonnées de tout les points 
+        
+        new_p_coord = np.asarray(coords)
+        mvt = [new_p_coord - self.prev_p_coord] # nb_points*dim = 10*2
+        self.prev_p_coord = new_p_coord
+        
+        held = [float(C.points[(i, 1)].hold is not None) for i in range(1, 5)]  # si le membre tient une prise 1 sinon 0
+        can_hold = [float(C.can_hold(i)) for i in range(1, 5)]  # si le membre peut tenir une prise 1 sinon 0(si il y en a une à portée)
+        nearest_holds = [C.vect_nearest_k_hold(i, n_hold_visible) for i in range(1, 5)]    # [[n_hol_visible] * 4], len_tot = n*4*dim
 
-        brut = coord + q + [G, goal, [C.trc_w], C.trc_v, held, can_hold] + dist_holds
-        obs = np.concatenate([np.ravel(x) for x in brut])
+        obs_parts = [*coords, *mvt, *q, G, goal, [C.trc_w], C.trc_v, held, can_hold, *nearest_holds]  # liste de listes
+
+        obs = np.concatenate([np.ravel(part) for part in obs_parts])
+
         return torch.tensor(obs, dtype=torch.float32)
 
     def _reset(self, td = None):
         voie = holds_generator(self.diff)
         self.C = init_climber(voie, do_graph=False)
-        self.prev_y = self.C.centre_masse()[1]
+        self.prev_y_G = self.C.centre_masse()[1]
         self.prev_y_pmax = max(p.coord[1] for p in self.C.points.values())
         self.prev_y_pmin = min(p.coord[1] for p in self.C.points.values())
+        self.prev_p_coord = np.asarray([self.C.points[k].coord for k in sorted(self.C.points)])
         return TensorDict({"observation": self._obs(),
                            "done": torch.zeros(1, dtype=torch.bool),
                            "terminated": torch.zeros(1, dtype=torch.bool),
@@ -96,20 +107,30 @@ class ClimbEnv(EnvBase):
         output = td["action"].cpu().numpy().astype(float)
         terminated, reward, couple = False, 0.0, 0.0
         try:
-            Couples = self.C.mvt(output)
-            couple = np.abs(Couples).sum()
-            y = self.C.centre_masse()[1]
+            couples = self.C.mvt(output)
+            couple = np.abs(couples).sum()
+            y_G = self.C.centre_masse()[1]
             y_pmax = max(p.coord[1] for p in self.C.points.values())
             y_pmin = min(p.coord[1] for p in self.C.points.values())
-            reward = 10.0 * (y - self.prev_y) + 10 * (y_pmax - self.prev_y_pmax) + 10 * (y_pmin - self.prev_y_pmin) + 0.1 / (1 + couple)
-            self.prev_y = y
-            self.prev_y_pmax = y_pmax
-            self.prev_y_pmin = y_pmin
+            higher_holds = 0
+            for i in range(1,5):
+                p = self.C.points[(i,1)]
+                if p.hold is not None and p.prev_hold is not None and p.hold != p.prev_hold :
+                    d_to_prev_holds = max(0, self.C.Holds[p.hold][1] - self.C.Holds[p.prev_hold][1])
+                    if d_to_prev_holds > 1e-3:
+                        higher_holds += d_to_prev_holds
+                        p.prev_hold = p.hold
+            reward = rewards_w([[10, higher_holds], [10, y_G-self.prev_y_G], [10, y_pmax-self.prev_y_pmax], [10,y_pmin-self.prev_y_pmin], [-1e-4, couple]])
+            
+            self.prev_y_G       = max(y_G, self.prev_y_G) 
+            self.prev_y_pmax    = max(y_pmax, self.prev_y_pmax) # pour éviter des oscillations
+            self.prev_y_pmin    = max(y_pmin, self.prev_y_pmin)
+            
             if self.C.win():
-                reward += 100.0
+                reward += 10_000
                 terminated = True
         except InvalidPosition:
-            terminated, reward = True, -10.0  # chute ou position impossible
+            terminated, reward = True, -50  # chute ou position impossible
         return TensorDict({"observation": self._obs(),
                         "reward": torch.tensor([reward], dtype=torch.float32),
                         "done": torch.tensor([terminated]),
@@ -278,5 +299,6 @@ def main(name, load : bool):
     
 name = "brain_1.pt"
 save_dir = r"C:\Users\andre\Documents\école\Prepa\TIPE\Algo\V2_DL\data"
+
 if __name__ == "__main__":
     main(name, load = False)
