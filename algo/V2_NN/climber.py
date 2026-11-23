@@ -64,7 +64,7 @@ min_q = 0.1
 min_trs = 0.01
  
 # Paramètres temporels
-T_tot = 5   # Durée totale de la simulation en secondes
+T_tot = 10   # Durée totale de la simulation en secondes
 f = 100     # Hz
 dt = 1/f
  
@@ -87,6 +87,7 @@ class point:
         self.type = typ   # in ["main","pied","bassin","epaule","coude","genou"]
         self.coord = np.asarray(coord, float)
         self.hold = None
+        self.prev_hold = None
         self.q = q
  
     def set_to(self, M):
@@ -103,8 +104,8 @@ class climber:
     def __init__(self, bdy_param, Holds, f0, direc, Fv_max, type, do_graph=False):
         self.Holds = Holds
         self.Holds_dict = {"main" : [], "pied" : []}
-        for h,typ in zip(Holds,type):
-            self.Holds_dict[typ].append(h)
+        for i_h,typ in zip(range(len(Holds)),type):
+            self.Holds_dict[typ].append(i_h)
         
         self.f0 = f0
         self.direc = direc
@@ -170,7 +171,7 @@ class climber:
  
         p1, p0 = self.points[(i,1)], self.points[(i,0)]
         p1.coord = h
-        p1.hold = i_h
+        p1.hold, p1.prev_hold = i_h, i_h
         p0.coord = self.coord_knee(i, init)
         self.q_limb[i] = chain_angles(o, p0.coord, h, self.q_trc + np.pi)
         return True
@@ -202,23 +203,24 @@ class climber:
         else:
             return min((P1, P2), key=lambda p: p[1])    # coude vers la bas
  
-    def nearest_hold(self, i):
-        "prise la plus proche avec un type correspondant au membre(pied ou min)"
+    def vect_nearest_k_hold(self, i, k) -> list:
+        "retourne pour les plus proches k prises tenable par le membre i, le vecteur : membre i -> nearest Holds"
         p1 = self.points[(i,1)]
         type = p1.type
-        return min(([k for k in range(len(self.Holds_dict[type])) if k not in self.holds_held]),
-                        key=lambda k: d(p1.coord, self.Holds[k]))
- 
-    def dist_nearest_k_hold(self, i, k):
-        p1 = self.points[(i,1)].coord
-        return sorted(d(h,p1) for h in self.Holds)[:k]
- 
+        p_to_holds = [vect(p1.coord,self.Holds[i_h]) for i_h in self.Holds_dict[type]]
+        return sorted(p_to_holds, key = lambda v: np.linalg.norm(v))[:k]
+    
+    def nearest_hold_ix(self, i):
+        "l'indice de la prise tenable la plus proche du membre i "
+        p1 = self.points[(i,1)]
+        return min(self.Holds_dict[p1.type], key = lambda i_h: d(p1.coord, self.Holds[i_h]))
+    
     def can_hold(self, i, i_h = None):
         p1 = self.points[(i,1)]
         if p1.hold is not None:
             return True
         if i_h is None:
-            i_h = self.nearest_hold(i)
+            i_h = self.nearest_hold_ix(i)
         o = self.points[ORIGIN[i]].coord
         l0,l1 = link_len(i)
         return d(p1.coord, self.Holds[i_h]) < r_hold and abs(l0 - l1) <= d(o, self.Holds[i_h]) <= l0 + l1
@@ -227,7 +229,7 @@ class climber:
         """Accroche les mains/pieds en fct de leur coordonnées"""
         p1 = self.points[(i,1)]
         if p1.hold is None:
-            i_h = self.nearest_hold(i)
+            i_h = self.nearest_hold_ix(i)
             if self.can_hold(i,i_h):
                 p1.hold = i_h
                 p1.coord = np.array(self.Holds[i_h], float)
@@ -278,8 +280,8 @@ class climber:
         # déplace le tronc
             # rotation autour du milieu
         if abs(wrap(q_bdy - self.q_trc)) > min_q:
-            C = PD(self.q_trc, self.trc_w, q_bdy, ang=True)
-            self.rot_bdy(C)
+            Couple = PD(self.q_trc, self.trc_w, q_bdy, ang=True)
+            self.rot_bdy(Couple)
         else:
             self.trc_w = 0.0
  
