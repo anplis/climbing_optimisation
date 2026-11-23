@@ -52,7 +52,7 @@ def holds_generator_rd(alpha): # densitée = nb prise/surface ou volumme de size
     Fv_max[i],Fv_max[-1] = Fv_max[-1],Fv_max[i]
     f0[i],f0[-1] = f0[-1],f0[i]
     direc[i],direc[-1] = direc[-1],direc[i]
-    type[i],type[-1] = type[-1],type[i]
+    type[i],type[-1] = type[-1], "main"   # la dernière prise est une prise de main
     
     return Holds, Fv_max, f0, direc, bassin, q_trc, type
 
